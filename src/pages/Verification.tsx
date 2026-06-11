@@ -5,9 +5,13 @@ import {
   Clock,
   DoorOpen,
   KeyRound,
+  Maximize2,
+  Menu,
+  Minimize2,
   Search,
   ScanLine,
   ShieldAlert,
+  X,
   XCircle,
   Zap,
 } from "lucide-react";
@@ -36,6 +40,47 @@ function fmt(ts?: Timestamp): string {
   }
 }
 
+function resultTitle(result: DisplayResult["result"]) {
+  if (result === "admitted") return "Accès autorisé";
+  if (result === "already_used") return "Déjà utilisé";
+  if (result === "not_found") return "Billet introuvable";
+  return "Billet invalide";
+}
+
+function scanStatus(
+  result: DisplayResult | null,
+  processing: boolean,
+  scanActive: boolean,
+) {
+  if (processing) {
+    return {
+      label: "Vérification...",
+      dot: "bg-brand-gold",
+      tone: "text-brand-gold",
+    };
+  }
+  if (result) {
+    const ok = result.result === "admitted";
+    return {
+      label: resultTitle(result.result),
+      dot: ok ? "bg-emerald-400" : "bg-brand-gold",
+      tone: ok ? "text-emerald-300" : "text-brand-gold",
+    };
+  }
+  if (scanActive) {
+    return {
+      label: "Prêt à scanner",
+      dot: "bg-emerald-400",
+      tone: "text-emerald-300",
+    };
+  }
+  return {
+    label: "Scanner en pause",
+    dot: "bg-white/50",
+    tone: "text-white/70",
+  };
+}
+
 export default function VerificationPage() {
   const { appUser } = useAuth();
   const [scanActive, setScanActive] = useState(true);
@@ -47,6 +92,9 @@ export default function VerificationPage() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [searchRef, setSearchRef] = useState("");
   const [searchMsg, setSearchMsg] = useState("");
+  const [focusMode, setFocusMode] = useState(false);
+  const [focusMenuOpen, setFocusMenuOpen] = useState(false);
+  const scannerShellRef = useRef<HTMLDivElement>(null);
   const processingRef = useRef(false);
 
   // Stats globales temps réel (tous les billets de l'événement).
@@ -60,6 +108,16 @@ export default function VerificationPage() {
     admitted: history.filter((h) => h.result === "admitted").length,
     refused: history.filter((h) => h.result !== "admitted").length,
   };
+  const currentStatus = scanStatus(result, processing, scanActive);
+
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      if (!document.fullscreenElement) setFocusMode(false);
+    };
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () =>
+      document.removeEventListener("fullscreenchange", onFullscreenChange);
+  }, []);
 
   // Mode auto : réarme le scanner automatiquement après affichage du résultat.
   useEffect(() => {
@@ -69,6 +127,23 @@ export default function VerificationPage() {
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result, autoMode]);
+
+  function openFocusMode() {
+    setFocusMode(true);
+    setFocusMenuOpen(false);
+    const el = scannerShellRef.current;
+    if (el?.requestFullscreen && !document.fullscreenElement) {
+      el.requestFullscreen().catch(() => {});
+    }
+  }
+
+  function closeFocusMode() {
+    setFocusMenuOpen(false);
+    setFocusMode(false);
+    if (document.fullscreenElement === scannerShellRef.current) {
+      document.exitFullscreen().catch(() => {});
+    }
+  }
 
   function searchByReference(e: React.FormEvent) {
     e.preventDefault();
@@ -90,6 +165,7 @@ export default function VerificationPage() {
   async function process(text: string) {
     if (processingRef.current) return;
     processingRef.current = true;
+    setFocusMenuOpen(false);
     setProcessing(true);
     setScanActive(false);
     try {
@@ -117,6 +193,7 @@ export default function VerificationPage() {
   }
 
   function next() {
+    setFocusMenuOpen(false);
     setResult(null);
     setScanActive(true);
   }
@@ -147,27 +224,191 @@ export default function VerificationPage() {
               </p>
             </div>
           </div>
-          <button
-            onClick={() => setAutoMode((v) => !v)}
-            className={`flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition-colors ${
-              autoMode
-                ? "bg-emerald-600 text-white"
-                : "bg-white text-brand-ink/60 ring-1 ring-black/10"
-            }`}
-            title="Réarme automatiquement le scanner après chaque billet"
-          >
-            <Zap size={14} /> Mode auto {autoMode ? "ON" : "OFF"}
-          </button>
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+            <button
+              onClick={openFocusMode}
+              className="flex items-center gap-1.5 rounded-xl bg-brand-ink px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-black"
+              title="Ouvrir le scanner en plein écran"
+            >
+              <Maximize2 size={14} /> Plein écran
+            </button>
+            <button
+              onClick={() => setAutoMode((v) => !v)}
+              className={`flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition-colors ${
+                autoMode
+                  ? "bg-emerald-600 text-white"
+                  : "bg-white text-brand-ink/60 ring-1 ring-black/10"
+              }`}
+              title="Réarme automatiquement le scanner après chaque billet"
+            >
+              <Zap size={14} /> Auto {autoMode ? "ON" : "OFF"}
+            </button>
+          </div>
         </div>
 
-        <div className="relative">
-          <QrScanner onResult={process} active={scanActive && !result} />
-          {result && <ResultOverlay result={result} onNext={next} />}
-          {processing && !result && (
-            <div className="absolute inset-0 grid place-items-center rounded-2xl bg-black/50 text-white">
-              Vérification…
+        <div
+          ref={scannerShellRef}
+          className={
+            focusMode
+              ? "fixed inset-0 z-50 flex h-[100dvh] flex-col bg-black text-white"
+              : "relative"
+          }
+        >
+          <div
+            className={
+              focusMode
+                ? "flex items-center justify-between gap-2 border-b border-white/10 bg-black/90 px-3 py-2 backdrop-blur"
+                : "hidden"
+            }
+            style={{
+              paddingTop: focusMode
+                ? "calc(env(safe-area-inset-top) + 0.5rem)"
+                : undefined,
+            }}
+          >
+            <div className="min-w-0">
+              <p className="truncate text-sm font-extrabold">Scanner</p>
+              <p
+                className={`flex items-center gap-1.5 text-xs font-semibold ${currentStatus.tone}`}
+              >
+                <span
+                  className={`h-2 w-2 rounded-full ${currentStatus.dot}`}
+                />
+                {currentStatus.label}
+              </p>
             </div>
-          )}
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => setAutoMode((v) => !v)}
+                className={`grid h-10 w-10 place-items-center rounded-xl ${
+                  autoMode
+                    ? "bg-emerald-500 text-white"
+                    : "bg-white/10 text-white"
+                }`}
+                title="Mode auto"
+              >
+                <Zap size={17} />
+              </button>
+              <button
+                onClick={() => setFocusMenuOpen((v) => !v)}
+                className={`grid h-10 w-10 place-items-center rounded-xl ${
+                  focusMenuOpen
+                    ? "bg-white text-brand-ink"
+                    : "bg-white/10 text-white"
+                }`}
+                title="Menu rapide"
+              >
+                {focusMenuOpen ? <X size={18} /> : <Menu size={18} />}
+              </button>
+              <button
+                onClick={closeFocusMode}
+                className="grid h-10 w-10 place-items-center rounded-xl bg-white/10 text-white"
+                title="Quitter le plein écran"
+              >
+                <Minimize2 size={18} />
+              </button>
+            </div>
+          </div>
+
+          <div className={focusMode ? "relative min-h-0 flex-1" : "relative"}>
+            <QrScanner
+              onResult={process}
+              active={scanActive && !result}
+              fullscreen={focusMode}
+            />
+            {result && (
+              <ResultOverlay
+                result={result}
+                onNext={next}
+                fullscreen={focusMode}
+              />
+            )}
+            {processing && !result && (
+              <div
+                className={`absolute inset-0 grid place-items-center bg-black/50 text-white ${
+                  focusMode ? "rounded-none text-lg font-bold" : "rounded-2xl"
+                }`}
+              >
+                Vérification…
+              </div>
+            )}
+          </div>
+
+          <div
+            className={
+              focusMode
+                ? "border-t border-white/10 bg-black/90 px-3 py-2 backdrop-blur"
+                : "hidden"
+            }
+            style={{
+              paddingBottom: focusMode
+                ? "calc(env(safe-area-inset-bottom) + 0.5rem)"
+                : undefined,
+            }}
+          >
+            <div className="flex items-center justify-between gap-3 text-xs">
+              <div className="min-w-0">
+                <p className="font-bold text-white">
+                  {stats.admitted} admis · {stats.refused} refusés
+                </p>
+                <p className="truncate text-white/60">
+                  Global : {live.used}/{live.total} entrés
+                </p>
+              </div>
+              <button
+                onClick={result ? next : () => setScanActive((v) => !v)}
+                className="rounded-xl bg-white px-3 py-2 text-xs font-bold text-brand-ink"
+              >
+                {result ? "Suivant" : scanActive ? "Pause" : "Reprendre"}
+              </button>
+            </div>
+          </div>
+
+          <div
+            className={
+              focusMode && focusMenuOpen
+                ? "absolute inset-x-3 bottom-20 z-20 rounded-xl bg-white p-3 text-brand-ink shadow-2xl ring-1 ring-black/10"
+                : "hidden"
+            }
+          >
+            <form onSubmit={submitManual} className="mb-3 flex items-end gap-2">
+              <div className="min-w-0 flex-1">
+                <label className="label">QR manuel</label>
+                <input
+                  className="input"
+                  value={manual}
+                  onChange={(e) => setManual(e.target.value)}
+                  placeholder="identifiant.jeton"
+                />
+              </div>
+              <button
+                type="submit"
+                className="btn-primary"
+                disabled={processing}
+              >
+                OK
+              </button>
+            </form>
+            <form onSubmit={searchByReference} className="flex items-end gap-2">
+              <div className="min-w-0 flex-1">
+                <label className="label">Référence</label>
+                <input
+                  className="input"
+                  value={searchRef}
+                  onChange={(e) => setSearchRef(e.target.value)}
+                  placeholder="SL-0001"
+                />
+                {searchMsg && (
+                  <p className="mt-1 text-xs font-medium text-brand-red">
+                    {searchMsg}
+                  </p>
+                )}
+              </div>
+              <button type="submit" className="btn-ghost" disabled={processing}>
+                OK
+              </button>
+            </form>
+          </div>
         </div>
 
         {/* Saisie manuelle */}
@@ -312,9 +553,11 @@ export default function VerificationPage() {
 function ResultOverlay({
   result,
   onNext,
+  fullscreen = false,
 }: {
   result: DisplayResult;
   onNext: () => void;
+  fullscreen?: boolean;
 }) {
   const r = result.result;
   const ticket = result.ticket;
@@ -337,14 +580,32 @@ function ResultOverlay({
 
   return (
     <div
-      className={`absolute inset-0 flex flex-col items-center justify-center rounded-2xl ${theme.bg} p-6 text-center text-white`}
+      className={`absolute inset-0 flex flex-col items-center justify-center ${theme.bg} text-center text-white ${
+        fullscreen ? "rounded-none px-5 py-10" : "rounded-2xl p-6"
+      }`}
     >
-      <Icon size={56} className="mb-2" />
-      <p className="font-display text-3xl tracking-wide">{theme.title}</p>
+      <Icon size={fullscreen ? 72 : 56} className="mb-2" />
+      <p
+        className={`font-display tracking-wide ${
+          fullscreen ? "text-4xl sm:text-5xl" : "text-3xl"
+        }`}
+      >
+        {theme.title}
+      </p>
 
       {ticket && (
-        <div className="mt-3 w-full max-w-xs rounded-xl bg-black/15 p-3 text-left text-sm">
-          <p className="text-lg font-bold leading-tight">{ticket.holderName}</p>
+        <div
+          className={`mt-3 w-full rounded-xl bg-black/15 p-3 text-left ${
+            fullscreen ? "max-w-sm text-base" : "max-w-xs text-sm"
+          }`}
+        >
+          <p
+            className={`font-bold leading-tight ${
+              fullscreen ? "text-2xl" : "text-lg"
+            }`}
+          >
+            {ticket.holderName}
+          </p>
           <p className="text-white/80">
             {cfg?.price} · {cfg?.label}
           </p>
@@ -358,7 +619,11 @@ function ResultOverlay({
       )}
 
       {r === "already_used" && (
-        <div className="mt-3 w-full max-w-xs rounded-xl bg-black/25 p-3 text-left text-sm">
+        <div
+          className={`mt-3 w-full rounded-xl bg-black/25 p-3 text-left ${
+            fullscreen ? "max-w-sm text-base" : "max-w-xs text-sm"
+          }`}
+        >
           <p className="flex items-center gap-1.5 font-semibold">
             <Clock size={14} /> Premier passage
           </p>
@@ -374,7 +639,9 @@ function ResultOverlay({
 
       <button
         onClick={onNext}
-        className="mt-5 rounded-xl bg-white px-6 py-2.5 text-sm font-bold text-brand-ink shadow hover:bg-white/90"
+        className={`mt-5 rounded-xl bg-white font-bold text-brand-ink shadow hover:bg-white/90 ${
+          fullscreen ? "px-8 py-3 text-base" : "px-6 py-2.5 text-sm"
+        }`}
       >
         Scanner le suivant
       </button>

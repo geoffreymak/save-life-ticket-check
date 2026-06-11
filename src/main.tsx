@@ -3,7 +3,10 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import { AuthProvider } from "./context/AuthContext";
+import { registerPwaServiceWorker } from "./pwa";
 import "./index.css";
+
+registerPwaServiceWorker();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

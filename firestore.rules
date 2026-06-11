@@ -34,6 +34,50 @@ service cloud.firestore {
         (roleOf() == 'admin' || roleOf() == 'generator' || roleOf() == 'verifier');
     }
 
+    function isValidCategory(category) {
+      return category in ['VVIP', 'VIP', 'STANDARD'];
+    }
+
+    function firstScanUpdate() {
+      return resource.data.status == 'valid'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status',
+          'scanCount',
+          'firstScanAt',
+          'firstScanBy',
+          'firstScanByEmail'
+        ])
+        && request.resource.data.diff(resource.data).affectedKeys().hasAll([
+          'status',
+          'scanCount',
+          'firstScanAt',
+          'firstScanBy',
+          'firstScanByEmail'
+        ])
+        && request.resource.data.status == 'used'
+        && request.resource.data.scanCount == resource.data.scanCount + 1
+        && request.resource.data.firstScanAt is timestamp
+        && request.resource.data.firstScanBy == request.auth.uid
+        && request.resource.data.firstScanByEmail is string;
+    }
+
+    function duplicateScanUpdate() {
+      return resource.data.status == 'used'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['scanCount'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasAll(['scanCount'])
+        && request.resource.data.status == resource.data.status
+        && request.resource.data.scanCount == resource.data.scanCount + 1;
+    }
+
+    function validScanLog() {
+      return request.resource.data.keys().hasOnly(['at', 'by', 'byEmail', 'result'])
+        && request.resource.data.keys().hasAll(['at', 'by', 'byEmail', 'result'])
+        && request.resource.data.at is timestamp
+        && request.resource.data.by == request.auth.uid
+        && request.resource.data.byEmail is string
+        && request.resource.data.result in ['admitted', 'already_used'];
+    }
+
     // ---- Utilisateurs ----
     match /users/{userId} {
       allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
@@ -67,22 +111,13 @@ service cloud.firestore {
         && request.resource.data.status == 'valid'
         && request.resource.data.scanCount == 0
         && request.resource.data.secret is string
-        && request.resource.data.category in ['VVIP', 'VIP', 'STANDARD'];
+        && isValidCategory(request.resource.data.category);
 
       // Scan : un vérificateur ne peut QUE consommer le billet.
       // Les champs d'identité sont immuables, le compteur ne fait qu'augmenter de 1,
       // et le statut ne peut que rester ou passer à 'used'.
       allow update: if isVerifier()
-        && request.resource.data.secret == resource.data.secret
-        && request.resource.data.holderName == resource.data.holderName
-        && request.resource.data.category == resource.data.category
-        && request.resource.data.batchId == resource.data.batchId
-        && request.resource.data.reference == resource.data.reference
-        && request.resource.data.createdBy == resource.data.createdBy
-        && request.resource.data.createdAt == resource.data.createdAt
-        && request.resource.data.scanCount == resource.data.scanCount + 1
-        && (request.resource.data.status == 'used'
-            || request.resource.data.status == resource.data.status);
+        && (firstScanUpdate() || duplicateScanUpdate());
 
       allow delete: if isAdmin();
 
@@ -90,7 +125,7 @@ service cloud.firestore {
       match /scans/{scanId} {
         allow read: if isStaff();
         allow create: if isVerifier()
-          && request.resource.data.by == request.auth.uid;
+          && validScanLog();
         allow update, delete: if false;
       }
     }
