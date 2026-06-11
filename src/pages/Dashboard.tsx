@@ -82,9 +82,9 @@ export default function DashboardPage() {
     : 0;
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
+    <div className="min-w-0 space-y-5">
+      <div className="flex min-w-0 flex-col items-start gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+        <div className="min-w-0">
           <h1 className="text-xl font-extrabold text-brand-ink">
             Tableau de bord
           </h1>
@@ -102,7 +102,7 @@ export default function DashboardPage() {
       </div>
 
       {/* KPIs */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid min-w-0 grid-cols-2 gap-3 lg:grid-cols-4">
         <Kpi
           icon={TicketIcon}
           label="Billets émis"
@@ -154,8 +154,8 @@ export default function DashboardPage() {
       </div>
 
       {/* Graphiques */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="card">
+      <div className="grid min-w-0 gap-4 lg:grid-cols-2">
+        <div className="card overflow-hidden">
           <p className="mb-3 font-semibold text-brand-ink">
             Répartition par catégorie
           </p>
@@ -186,7 +186,7 @@ export default function DashboardPage() {
           )}
         </div>
 
-        <div className="card">
+        <div className="card overflow-hidden">
           <p className="mb-3 font-semibold text-brand-ink">
             Entrés vs Restants par catégorie
           </p>
@@ -224,22 +224,22 @@ export default function DashboardPage() {
       </div>
 
       {/* Détail par catégorie + flux live */}
-      <div className="grid gap-4 lg:grid-cols-[1fr_380px]">
-        <div className="space-y-3">
+      <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
+        <div className="min-w-0 space-y-3">
           {CATEGORY_LIST.map((c) => {
             const s = stats.byCategory[c.id];
             const pct = s.total ? Math.round((s.used / s.total) * 100) : 0;
             return (
               <div key={c.id} className="card">
-                <div className="mb-2 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
+                <div className="mb-2 flex min-w-0 items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-2">
                     <span
                       className="rounded-md px-2 py-0.5 text-xs font-bold"
                       style={{ background: c.accent, color: c.accentText }}
                     >
                       {c.price}
                     </span>
-                    <span className="text-sm font-semibold text-brand-ink">
+                    <span className="min-w-0 truncate text-sm font-semibold text-brand-ink">
                       {c.label}
                     </span>
                   </div>
@@ -253,7 +253,7 @@ export default function DashboardPage() {
                     style={{ width: `${pct}%`, background: c.accent }}
                   />
                 </div>
-                <div className="mt-2 flex justify-between text-xs text-brand-ink/60">
+                <div className="mt-2 flex flex-wrap justify-between gap-x-3 gap-y-1 text-xs text-brand-ink/60">
                   <span>{s.total} émis</span>
                   <span className="text-emerald-700">{s.used} entrés</span>
                   <span className="text-brand-red">{s.remaining} restants</span>
@@ -279,7 +279,7 @@ export default function DashboardPage() {
               const cat = t ? CATEGORIES[t.category] : null;
               const admitted = s.result === "admitted";
               return (
-                <div key={s.id} className="flex items-center gap-3 px-4 py-2.5">
+                <div key={s.id} className="flex min-w-0 items-center gap-3 px-4 py-2.5">
                   <span
                     className={`grid h-8 w-8 shrink-0 place-items-center rounded-full ${admitted ? "bg-emerald-100 text-emerald-700" : "bg-orange-100 text-orange-600"}`}
                   >
@@ -329,7 +329,7 @@ function Kpi({
   tint: string;
 }) {
   return (
-    <div className="card flex items-center gap-3">
+    <div className="card flex min-w-0 items-center gap-3">
       <span
         className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl ${tint}`}
         style={{ color }}

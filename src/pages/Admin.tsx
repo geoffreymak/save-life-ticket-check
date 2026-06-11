@@ -48,12 +48,12 @@ export default function AdminPage() {
   }
 
   return (
-    <div>
-      <div className="mb-6 flex items-center gap-3">
-        <span className="grid h-10 w-10 place-items-center rounded-xl bg-brand-red text-white">
+    <div className="min-w-0">
+      <div className="mb-6 flex min-w-0 items-start gap-3">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-red text-white">
           <UserCog size={20} />
         </span>
-        <div>
+        <div className="min-w-0">
           <h1 className="text-xl font-extrabold text-brand-ink">Gestion des utilisateurs</h1>
           <p className="text-sm text-brand-ink/60">
             Attribuez les rôles d'accès. Seuls les administrateurs voient cette page.
@@ -72,7 +72,7 @@ export default function AdminPage() {
       ) : (
         <div className="card overflow-hidden p-0">
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
+            <table className="min-w-[680px] w-full text-left text-sm">
               <thead className="bg-brand-cream/60 text-xs uppercase tracking-wide text-brand-ink/50">
                 <tr>
                   <th className="px-4 py-3">Utilisateur</th>

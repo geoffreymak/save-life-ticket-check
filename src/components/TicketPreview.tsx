@@ -23,7 +23,7 @@ export function TicketPreview({ ticket }: { ticket: Ticket }) {
   }, [ticket.id, ticket.secret, ticket.category])
 
   return (
-    <div className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-black/5">
+    <div className="min-w-0 overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-black/5 sm:rounded-2xl">
       <div className="aspect-[2480/877] w-full bg-brand-cream/50">
         {src ? (
           <img src={src} alt={`Billet ${ticket.reference}`} className="h-full w-full object-contain" />
@@ -33,7 +33,7 @@ export function TicketPreview({ ticket }: { ticket: Ticket }) {
           </div>
         )}
       </div>
-      <div className="flex items-center justify-between gap-2 px-3 py-2.5">
+      <div className="grid gap-2 px-3 py-2.5 sm:flex sm:items-center sm:justify-between">
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-brand-ink">{ticket.holderName}</p>
           <p className="text-xs text-brand-ink/50">
@@ -46,9 +46,9 @@ export function TicketPreview({ ticket }: { ticket: Ticket }) {
             {ticket.reference}
           </p>
         </div>
-        <div className="flex shrink-0 gap-1.5">
+        <div className="grid grid-cols-2 gap-1.5 sm:flex sm:shrink-0">
           <button
-            className="btn-ghost px-2.5 py-1.5 text-xs"
+            className="btn-ghost w-full px-2.5 py-1.5 text-xs sm:w-auto"
             disabled={busy !== null}
             onClick={async () => {
               setBusy('png')
@@ -62,7 +62,7 @@ export function TicketPreview({ ticket }: { ticket: Ticket }) {
             {busy === 'png' ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} PNG
           </button>
           <button
-            className="btn-gold px-2.5 py-1.5 text-xs"
+            className="btn-gold w-full px-2.5 py-1.5 text-xs sm:w-auto"
             disabled={busy !== null}
             onClick={async () => {
               setBusy('pdf')

@@ -31,17 +31,17 @@ export default function GenerationPage() {
   const [tab, setTab] = useState<Tab>("nouveau");
 
   return (
-    <div>
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-extrabold text-brand-ink">
+    <div className="min-w-0">
+      <div className="mb-5 flex min-w-0 flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-xl font-extrabold leading-tight text-brand-ink">
             Génération des billets
           </h1>
-          <p className="text-sm text-brand-ink/60">
+          <p className="mt-1 max-w-[32rem] text-sm leading-snug text-brand-ink/60">
             Importez la liste, générez les QR codes et exportez en PDF / PNG.
           </p>
         </div>
-        <div className="flex rounded-xl bg-white p-1 ring-1 ring-black/5">
+        <div className="grid w-full grid-cols-2 rounded-xl bg-white p-1 ring-1 ring-black/5 sm:w-auto">
           <button
             className={`rounded-lg px-3.5 py-1.5 text-sm font-semibold ${tab === "nouveau" ? "bg-brand-red text-white" : "text-brand-ink/60"}`}
             onClick={() => setTab("nouveau")}
@@ -177,10 +177,10 @@ function NewImport({ user }: { user: { uid: string; email: string } }) {
   if (generated) {
     return (
       <div>
-        <div className="card mb-5 flex flex-wrap items-center justify-between gap-3 bg-emerald-50 ring-emerald-200">
-          <div className="flex items-center gap-3">
-            <CheckCircle2 className="text-emerald-600" />
-            <div>
+        <div className="card mb-5 grid gap-3 bg-emerald-50 ring-emerald-200 sm:flex sm:flex-wrap sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-center gap-3">
+            <CheckCircle2 className="shrink-0 text-emerald-600" />
+            <div className="min-w-0">
               <p className="font-semibold text-emerald-800">
                 {generated.length} billet(s) généré(s) avec succès
               </p>
@@ -189,9 +189,9 @@ function NewImport({ user }: { user: { uid: string; email: string } }) {
               </p>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
             <button
-              className="btn-primary"
+              className="btn-primary w-full sm:w-auto"
               disabled={exporting}
               onClick={exportAllPdf}
             >
@@ -203,7 +203,7 @@ function NewImport({ user }: { user: { uid: string; email: string } }) {
               PDF (1 fichier)
             </button>
             <button
-              className="btn-gold"
+              className="btn-gold w-full sm:w-auto"
               disabled={zipping !== null}
               onClick={() => exportAllZip("pdf")}
             >
@@ -217,7 +217,7 @@ function NewImport({ user }: { user: { uid: string; email: string } }) {
                 : "PDF (.zip)"}
             </button>
             <button
-              className="btn-gold"
+              className="btn-gold w-full sm:w-auto"
               disabled={zipping !== null}
               onClick={() => exportAllZip("png")}
             >
@@ -230,13 +230,13 @@ function NewImport({ user }: { user: { uid: string; email: string } }) {
                 ? `PNG ${zipping.done}/${zipping.total}`
                 : "PNG (.zip)"}
             </button>
-            <button className="btn-ghost" onClick={reset}>
+            <button className="btn-ghost col-span-2 w-full sm:col-span-1 sm:w-auto" onClick={reset}>
               Nouvel import
             </button>
           </div>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-2">
+        <div className="grid min-w-0 gap-4 sm:grid-cols-2 xl:grid-cols-2">
           {generated.map((t) => (
             <TicketPreview key={t.id} ticket={t} />
           ))}
@@ -246,11 +246,11 @@ function NewImport({ user }: { user: { uid: string; email: string } }) {
   }
 
   return (
-    <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
-      <div className="space-y-5">
+    <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="min-w-0 space-y-5">
         {/* Zone d'import */}
         <div
-          className="card flex flex-col items-center justify-center border-2 border-dashed border-brand-red/30 bg-white py-10 text-center"
+          className="card flex flex-col items-center justify-center border-2 border-dashed border-brand-red/30 bg-white px-4 py-8 text-center sm:py-10"
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
             e.preventDefault();
@@ -265,14 +265,14 @@ function NewImport({ user }: { user: { uid: string; email: string } }) {
             Glissez votre fichier CSV ici
           </p>
           <p className="mb-4 text-sm text-brand-ink/50">ou</p>
-          <div className="flex gap-2">
+          <div className="grid w-full max-w-sm grid-cols-2 gap-2 sm:flex sm:w-auto sm:max-w-none">
             <button
-              className="btn-primary"
+              className="btn-primary w-full"
               onClick={() => fileRef.current?.click()}
             >
               <FileSpreadsheet size={16} /> Choisir un fichier
             </button>
-            <button className="btn-ghost" onClick={downloadCsvTemplate}>
+            <button className="btn-ghost w-full" onClick={downloadCsvTemplate}>
               <Download size={16} /> Modèle CSV
             </button>
           </div>
@@ -287,7 +287,7 @@ function NewImport({ user }: { user: { uid: string; email: string } }) {
             }}
           />
           {fileName && (
-            <p className="mt-3 text-xs text-brand-ink/50">
+            <p className="mt-3 max-w-full truncate text-xs text-brand-ink/50">
               Fichier : {fileName}
             </p>
           )}
@@ -317,7 +317,56 @@ function NewImport({ user }: { user: { uid: string; email: string } }) {
                 )}
               </div>
             </div>
-            <div className="max-h-[420px] overflow-auto">
+            <div className="divide-y divide-black/5 sm:hidden">
+              {rows.map((r) => (
+                <div key={r.line} className={r.valid ? "p-4" : "bg-red-50/50 p-4"}>
+                  <div className="mb-2 flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-brand-ink/40">
+                        Ligne {r.line}
+                      </p>
+                      <p className="mt-0.5 break-words text-sm font-bold text-brand-ink">
+                        {r.holderName || "â€”"}
+                      </p>
+                    </div>
+                    {r.category ? (
+                      <span
+                        className="shrink-0 rounded px-2 py-1 text-xs font-bold"
+                        style={{
+                          background: CATEGORIES[r.category].accent,
+                          color: CATEGORIES[r.category].accentText,
+                        }}
+                      >
+                        {CATEGORIES[r.category].price}
+                      </span>
+                    ) : (
+                      <span className="shrink-0 text-xs font-semibold text-red-600">
+                        {r.rawCategory || "â€”"}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between gap-3 text-xs">
+                    <span className="min-w-0 truncate text-brand-ink/60">
+                      {r.email || r.phone || "Aucun contact"}
+                    </span>
+                    {r.valid ? (
+                      <span className="inline-flex shrink-0 items-center gap-1 font-semibold text-emerald-600">
+                        <CheckCircle2 size={14} /> OK
+                      </span>
+                    ) : (
+                      <span
+                        className="inline-flex shrink-0 items-center gap-1 font-semibold text-red-600"
+                        title={r.errors.join(", ")}
+                      >
+                        <AlertTriangle size={14} /> {r.errors[0]}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="hidden max-h-[420px] overflow-auto sm:block">
               <table className="w-full text-left text-sm">
                 <thead className="sticky top-0 bg-brand-cream/80 text-xs uppercase tracking-wide text-brand-ink/50 backdrop-blur">
                   <tr>
@@ -379,7 +428,7 @@ function NewImport({ user }: { user: { uid: string; email: string } }) {
       </div>
 
       {/* Panneau latéral */}
-      <div className="space-y-5">
+      <div className="min-w-0 space-y-5">
         <div className="card">
           <p className="mb-3 font-semibold text-brand-ink">
             Catégories disponibles
@@ -519,19 +568,19 @@ function ExistingBatches() {
     );
 
   return (
-    <div className="space-y-3">
+    <div className="min-w-0 space-y-3">
       {batches.map((b) => (
         <div key={b.id} className="card p-0">
-          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-            <div>
-              <p className="font-semibold text-brand-ink">{b.name}</p>
-              <p className="text-xs text-brand-ink/50">
+          <div className="grid gap-3 px-4 py-3 sm:flex sm:flex-wrap sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="truncate font-semibold text-brand-ink">{b.name}</p>
+              <p className="truncate text-xs text-brand-ink/50">
                 {b.count} billet(s) · par {b.createdByEmail}
               </p>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
               <button
-                className="btn-ghost text-xs"
+                className="btn-ghost w-full text-xs sm:w-auto"
                 disabled={exporting === b.id}
                 onClick={() => exportAll(b)}
               >
@@ -543,7 +592,7 @@ function ExistingBatches() {
                 PDF
               </button>
               <button
-                className="btn-gold text-xs"
+                className="btn-gold w-full text-xs sm:w-auto"
                 disabled={zipping?.id === b.id}
                 onClick={() => exportZip(b, "pdf")}
               >
@@ -557,7 +606,7 @@ function ExistingBatches() {
                   : "PDF .zip"}
               </button>
               <button
-                className="btn-gold text-xs"
+                className="btn-gold w-full text-xs sm:w-auto"
                 disabled={zipping?.id === b.id}
                 onClick={() => exportZip(b, "png")}
               >
@@ -570,7 +619,10 @@ function ExistingBatches() {
                   ? `${zipping.done}/${zipping.total}`
                   : "PNG .zip"}
               </button>
-              <button className="btn-primary text-xs" onClick={() => open(b)}>
+              <button
+                className="btn-primary col-span-2 w-full text-xs sm:col-span-1 sm:w-auto"
+                onClick={() => open(b)}
+              >
                 {openId === b.id ? "Masquer" : "Voir les billets"}
               </button>
             </div>

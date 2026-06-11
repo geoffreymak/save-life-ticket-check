@@ -12,8 +12,8 @@ export default function PendingPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-brand-cream p-6">
-      <div className="card max-w-md text-center">
+    <div className="flex min-h-screen min-w-0 items-center justify-center overflow-x-clip bg-brand-cream px-4 py-8 sm:p-6">
+      <div className="card w-full max-w-md text-center">
         <span className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl bg-brand-gold/20 text-brand-red">
           <Clock size={26} />
         </span>
@@ -24,7 +24,7 @@ export default function PendingPage() {
           (<strong>générateur</strong> ou <strong>vérificateur</strong>) avant que vous puissiez
           accéder à la plateforme.
         </p>
-        <div className="mt-6 flex justify-center gap-2">
+        <div className="mt-6 grid gap-2 sm:flex sm:justify-center">
           <button className="btn-ghost" onClick={() => refreshAppUser().then(() => navigate('/'))}>
             <RefreshCw size={16} /> Vérifier à nouveau
           </button>

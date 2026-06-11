@@ -40,21 +40,21 @@ export function Layout({ children }: { children: ReactNode }) {
   ];
 
   return (
-    <div className="min-h-screen bg-brand-cream">
+    <div className="min-h-screen overflow-x-clip bg-brand-cream">
       <header
         className="sticky top-0 z-20 border-b border-black/5 bg-brand-red text-white shadow-ticket"
         style={{ paddingTop: "env(safe-area-inset-top)" }}
       >
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3">
-          <div className="flex items-center gap-2.5">
-            <span className="grid h-9 w-9 place-items-center rounded-lg bg-brand-gold text-brand-redDark">
+        <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-2 px-3 py-3 sm:gap-3 sm:px-4">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-brand-gold text-brand-redDark">
               <Ticket size={20} />
             </span>
-            <div className="leading-tight">
-              <p className="text-sm font-extrabold uppercase tracking-wide">
+            <div className="min-w-0 leading-tight">
+              <p className="truncate text-sm font-extrabold uppercase tracking-wide">
                 Save Life
               </p>
-              <p className="text-[11px] text-white/70">
+              <p className="truncate text-[11px] text-white/70">
                 Billetterie · Journée Caritative
               </p>
             </div>
@@ -103,7 +103,7 @@ export function Layout({ children }: { children: ReactNode }) {
             )}
           </nav>
 
-          <div className="flex items-center gap-3">
+          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
             <div className="hidden text-right leading-tight sm:block">
               <p className="text-xs font-semibold">{appUser?.displayName}</p>
               <p className="text-[10px] uppercase tracking-wide text-white/70">
@@ -121,13 +121,13 @@ export function Layout({ children }: { children: ReactNode }) {
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 py-5 pb-28 sm:pb-6">
+      <main className="mx-auto w-full max-w-6xl min-w-0 px-3 py-4 pb-28 sm:px-4 sm:py-5 sm:pb-6">
         {children}
       </main>
 
       {/* Barre d'onglets fixe (style application mobile) */}
       <nav
-        className="fixed inset-x-0 bottom-0 z-30 flex border-t border-black/10 bg-white/95 backdrop-blur sm:hidden"
+        className="fixed inset-x-0 bottom-0 z-30 flex overflow-hidden border-t border-black/10 bg-white/95 backdrop-blur sm:hidden"
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
         {tabs.map((t) => (
@@ -135,7 +135,7 @@ export function Layout({ children }: { children: ReactNode }) {
             key={t.to}
             to={t.to}
             className={({ isActive }) =>
-              `flex flex-1 flex-col items-center gap-0.5 py-2.5 text-[10px] font-semibold transition-colors ${
+              `flex min-w-0 flex-1 flex-col items-center gap-0.5 py-2.5 text-[10px] font-semibold transition-colors ${
                 isActive ? "text-brand-red" : "text-brand-ink/50"
               }`
             }
@@ -149,7 +149,7 @@ export function Layout({ children }: { children: ReactNode }) {
                 >
                   <t.icon size={20} />
                 </span>
-                {t.label}
+                <span className="max-w-full truncate px-1">{t.label}</span>
               </>
             )}
           </NavLink>

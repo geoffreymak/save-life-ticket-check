@@ -178,17 +178,15 @@ export function QrScanner({
 
   return (
     <div
-      className={`relative overflow-hidden bg-black ${
-        fullscreen ? 'h-full min-h-0 rounded-none' : 'rounded-2xl'
+      className={`relative w-full max-w-full overflow-hidden bg-black ${
+        fullscreen
+          ? 'h-full min-h-0 rounded-none'
+          : 'aspect-[3/4] max-h-[70vh] rounded-2xl sm:aspect-[4/3]'
       } ${className}`}
     >
       <div
         id={regionId}
-        className={`h-full w-full ${
-          fullscreen
-            ? '[&_video]:!h-full [&_video]:!w-full [&_video]:!object-cover'
-            : 'min-h-[320px] [&_video]:!w-full [&_video]:!rounded-2xl'
-        }`}
+        className="h-full w-full [&_canvas]:!h-full [&_canvas]:!w-full [&_div]:!max-w-full [&_video]:!h-full [&_video]:!w-full [&_video]:!object-cover"
       />
       {/* Cadre de visée stylisé */}
       <div className="pointer-events-none absolute inset-0 grid place-items-center">

@@ -207,41 +207,43 @@ export default function VerificationPage() {
   }
 
   return (
-    <div className="grid gap-5 lg:grid-cols-[1fr_380px]">
+    <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">
       {/* Colonne scanner */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <span className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-600 text-white">
+      <div className="min-w-0 space-y-4">
+        <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-emerald-600 text-white">
               <ScanLine size={20} />
             </span>
-            <div>
-              <h1 className="text-xl font-extrabold text-brand-ink">
+            <div className="min-w-0">
+              <h1 className="text-2xl font-extrabold leading-tight text-brand-ink sm:text-xl">
                 Vérification des accès
               </h1>
-              <p className="text-sm text-brand-ink/60">
+              <p className="mt-1 max-w-[28rem] text-sm leading-snug text-brand-ink/60">
                 Scannez le QR code du billet pour contrôler l'entrée.
               </p>
             </div>
           </div>
-          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          <div className="grid w-full shrink-0 grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:justify-end">
             <button
               onClick={openFocusMode}
-              className="flex items-center gap-1.5 rounded-xl bg-brand-ink px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-black"
+              className="flex min-w-0 items-center justify-center gap-1.5 rounded-xl bg-brand-ink px-2.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-black sm:px-3"
               title="Ouvrir le scanner en plein écran"
             >
-              <Maximize2 size={14} /> Plein écran
+              <Maximize2 size={14} className="shrink-0" />
+              <span className="truncate">Plein écran</span>
             </button>
             <button
               onClick={() => setAutoMode((v) => !v)}
-              className={`flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition-colors ${
+              className={`flex min-w-0 items-center justify-center gap-1.5 rounded-xl px-2.5 py-2 text-xs font-semibold transition-colors sm:px-3 ${
                 autoMode
                   ? "bg-emerald-600 text-white"
                   : "bg-white text-brand-ink/60 ring-1 ring-black/10"
               }`}
               title="Réarme automatiquement le scanner après chaque billet"
             >
-              <Zap size={14} /> Auto {autoMode ? "ON" : "OFF"}
+              <Zap size={14} className="shrink-0" />
+              <span className="truncate">Auto {autoMode ? "ON" : "OFF"}</span>
             </button>
           </div>
         </div>
@@ -412,8 +414,11 @@ export default function VerificationPage() {
         </div>
 
         {/* Saisie manuelle */}
-        <form onSubmit={submitManual} className="card flex items-end gap-2">
-          <div className="flex-1">
+        <form
+          onSubmit={submitManual}
+          className="card grid gap-3 sm:flex sm:items-end"
+        >
+          <div className="min-w-0 flex-1">
             <label className="label">Saisie manuelle (contenu du QR)</label>
             <div className="relative">
               <KeyRound
@@ -428,7 +433,11 @@ export default function VerificationPage() {
               />
             </div>
           </div>
-          <button type="submit" className="btn-primary" disabled={processing}>
+          <button
+            type="submit"
+            className="btn-primary w-full sm:w-auto"
+            disabled={processing}
+          >
             Vérifier
           </button>
         </form>
@@ -436,9 +445,9 @@ export default function VerificationPage() {
         {/* Recherche par référence (billet papier sans QR lisible) */}
         <form
           onSubmit={searchByReference}
-          className="card flex items-end gap-2"
+          className="card grid gap-3 sm:flex sm:items-end"
         >
-          <div className="flex-1">
+          <div className="min-w-0 flex-1">
             <label className="label">Rechercher par référence</label>
             <div className="relative">
               <Search
@@ -458,18 +467,22 @@ export default function VerificationPage() {
               </p>
             )}
           </div>
-          <button type="submit" className="btn-ghost" disabled={processing}>
+          <button
+            type="submit"
+            className="btn-ghost w-full sm:w-auto"
+            disabled={processing}
+          >
             Valider
           </button>
         </form>
       </div>
 
       {/* Colonne stats + historique */}
-      <div className="space-y-4">
+      <div className="min-w-0 space-y-4">
         {/* Stats globales temps réel */}
         <div className="card">
           <div className="mb-3 flex items-center justify-between">
-            <p className="flex items-center gap-2 font-semibold text-brand-ink">
+            <p className="flex min-w-0 items-center gap-2 font-semibold text-brand-ink">
               <DoorOpen size={18} className="text-emerald-600" /> Entrées (temps
               réel)
             </p>
@@ -491,7 +504,7 @@ export default function VerificationPage() {
               return (
                 <div
                   key={c.id}
-                  className="flex items-center justify-between text-xs"
+                  className="flex min-w-0 items-center justify-between gap-2 text-xs"
                 >
                   <span
                     className="rounded px-1.5 py-0.5 font-bold"
@@ -499,7 +512,7 @@ export default function VerificationPage() {
                   >
                     {c.price}
                   </span>
-                  <span className="text-brand-ink/60">
+                  <span className="min-w-0 text-right text-brand-ink/60">
                     <span className="font-semibold text-emerald-700">
                       {s.used}
                     </span>{" "}
@@ -511,7 +524,7 @@ export default function VerificationPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid min-w-0 grid-cols-2 gap-3">
           <div className="card text-center">
             <p className="text-3xl font-extrabold text-emerald-600">
               {stats.admitted}

@@ -47,7 +47,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="grid min-h-screen md:grid-cols-2">
+    <div className="grid min-h-screen min-w-0 overflow-x-clip md:grid-cols-2">
       {/* Panneau visuel inspiré du billet */}
       <div className="relative hidden flex-col justify-between overflow-hidden bg-brand-red p-10 text-white md:flex">
         <div className="absolute -right-20 -top-24 h-72 w-72 rounded-full bg-brand-gold/20 blur-2xl" />
@@ -73,7 +73,7 @@ export default function LoginPage() {
       </div>
 
       {/* Formulaire */}
-      <div className="flex items-center justify-center bg-brand-cream p-6">
+      <div className="flex min-w-0 items-center justify-center bg-brand-cream px-4 py-8 sm:p-6">
         <form onSubmit={submit} className="w-full max-w-sm">
           <div className="mb-6 md:hidden">
             <span className="grid h-11 w-11 place-items-center rounded-xl bg-brand-red text-white">
