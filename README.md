@@ -11,9 +11,9 @@ les accès** par scan caméra avec contrôle anti-fraude (usage unique).
 
 - **Import CSV** avec détection automatique des colonnes et validation.
 - **3 catégories** de billets correspondant aux modèles fournis :
-  - `100 $` — ACCÈS SOLIDAIRE PRESTIGE VVP
-  - `50 $` — ACCÈS SOLIDAIRE VP
-  - `15000 FC` — ACCÈS SOLIDAIRE
+  - `VVIP` — `100 $`
+  - `VIP` — `50 $`
+  - `Standard` — `10 $`
 - **Génération de QR codes** placés automatiquement dans le cadre « VERIFICATION ACCÈS »
   de chaque modèle.
 - **Export PDF & PNG** par billet ou par lot complet.
@@ -112,8 +112,8 @@ Colonnes reconnues (insensible à la casse/accents) :
 | `reference` | ref, numero, no, id           |     ❌      |
 | `place`     | seat, siege, table            |     ❌      |
 
-`categorie` accepte : `100` / `50` / `15000` (ou `100$`, `15000 fc`, …) ou les identifiants
-`PRESTIGE_VVP` / `VP` / `SOLIDAIRE`.
+`categorie` accepte : `VVIP` / `VIP` / `Standard` ou `100` / `50` / `10`
+(avec variantes comme `100$`, `50 $`, `10$`).
 
 Un **modèle CSV** est téléchargeable directement depuis l'écran de génération.
 
@@ -189,7 +189,10 @@ pour un démarrage rapide et un usage hors-ligne partiel (les écritures nécess
 ## 📁 Structure
 
 ```
-public/templates/        Modèles PNG des 3 billets
+public/templates/
+  billet-100.png         Modèle VVIP — 100 $
+  billet-50.png          Modèle VIP — 50 $
+  billet-10.png          Modèle Standard — 10 $
 src/
   lib/                   firebase, types, categories, crypto, csv, tickets, users, rendu
   context/AuthContext    Authentification + rôles

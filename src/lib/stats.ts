@@ -7,6 +7,7 @@ import {
   query,
   type Timestamp,
 } from "firebase/firestore";
+import { CATEGORY_LIST } from "./categories";
 import { db } from "./firebase";
 import type { CategoryId, Ticket } from "./types";
 
@@ -91,11 +92,13 @@ export function computeStats(
   tickets: Ticket[],
   scans: LiveScan[],
 ): ComputedStats {
-  const byCategory: Record<CategoryId, CategoryStat> = {
-    PRESTIGE_VVP: EMPTY_CAT("PRESTIGE_VVP"),
-    VP: EMPTY_CAT("VP"),
-    SOLIDAIRE: EMPTY_CAT("SOLIDAIRE"),
-  };
+  const byCategory = CATEGORY_LIST.reduce(
+    (acc, cat) => {
+      acc[cat.id] = EMPTY_CAT(cat.id);
+      return acc;
+    },
+    {} as Record<CategoryId, CategoryStat>,
+  );
   let used = 0;
   let refusedScans = 0;
   for (const t of tickets) {

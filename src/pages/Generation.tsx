@@ -428,9 +428,9 @@ function NewImport({ user }: { user: { uid: string; email: string } }) {
             <code>place</code>.
           </p>
           <p className="mt-2">
-            Catégorie acceptée : <code>100</code>/<code>50</code>/
-            <code>15000</code> ou <code>PRESTIGE_VVP</code>/<code>VP</code>/
-            <code>SOLIDAIRE</code>.
+            Catégorie acceptée : <code>VVIP</code>/<code>VIP</code>/
+            <code>Standard</code> ou <code>100</code>/<code>50</code>/
+            <code>10</code>.
           </p>
         </div>
       </div>

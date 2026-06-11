@@ -24,9 +24,9 @@ export interface CategoryConfig {
 }
 
 export const CATEGORIES: Record<CategoryId, CategoryConfig> = {
-  PRESTIGE_VVP: {
-    id: 'PRESTIGE_VVP',
-    label: 'ACCÈS SOLIDAIRE PRESTIGE VVP',
+  VVIP: {
+    id: 'VVIP',
+    label: 'VVIP',
     price: '100 $',
     template: '/templates/billet-100.png',
     width: 2480,
@@ -34,11 +34,11 @@ export const CATEGORIES: Record<CategoryId, CategoryConfig> = {
     qr: { cx: 2307, cy: 675, size: 196 },
     accent: '#B11116',
     accentText: '#ffffff',
-    aliases: ['100', '100$', '100 $', 'prestige', 'prestige vvp', 'vvp', 'prestige_vvp'],
+    aliases: ['100', '100$', '100 $', 'vvip', 'vvp', 'prestige', 'prestige vvp', 'prestige_vvp'],
   },
-  VP: {
-    id: 'VP',
-    label: 'ACCÈS SOLIDAIRE VP',
+  VIP: {
+    id: 'VIP',
+    label: 'VIP',
     price: '50 $',
     template: '/templates/billet-50.png',
     width: 2480,
@@ -46,19 +46,19 @@ export const CATEGORIES: Record<CategoryId, CategoryConfig> = {
     qr: { cx: 2307, cy: 675, size: 196 },
     accent: '#E2A507',
     accentText: '#7E0C10',
-    aliases: ['50', '50$', '50 $', 'vp', 'solidaire vp'],
+    aliases: ['50', '50$', '50 $', 'vip', 'vp', 'solidaire vip', 'solidaire vp'],
   },
-  SOLIDAIRE: {
-    id: 'SOLIDAIRE',
-    label: 'ACCÈS SOLIDAIRE',
-    price: '15000 FC',
-    template: '/templates/billet-15000.png',
+  STANDARD: {
+    id: 'STANDARD',
+    label: 'Standard',
+    price: '10 $',
+    template: '/templates/billet-10.png',
     width: 2480,
     height: 877,
     qr: { cx: 2307, cy: 675, size: 196 },
     accent: '#C9A86A',
     accentText: '#7E0C10',
-    aliases: ['15000', '15000fc', '15000 fc', '15 000', 'solidaire', 'fc'],
+    aliases: ['10', '10$', '10 $', 'standard', 'std'],
   },
 }
 

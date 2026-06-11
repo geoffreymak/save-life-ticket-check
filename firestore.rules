@@ -67,7 +67,7 @@ service cloud.firestore {
         && request.resource.data.status == 'valid'
         && request.resource.data.scanCount == 0
         && request.resource.data.secret is string
-        && request.resource.data.category in ['PRESTIGE_VVP', 'VP', 'SOLIDAIRE'];
+        && request.resource.data.category in ['VVIP', 'VIP', 'STANDARD'];
 
       // Scan : un vérificateur ne peut QUE consommer le billet.
       // Les champs d'identité sont immuables, le compteur ne fait qu'augmenter de 1,

@@ -98,9 +98,9 @@ export function parseCsv(text: string): ParseResult {
 
 export const CSV_TEMPLATE =
   'nom,categorie,email,telephone,reference,place\n' +
-  'Jean Mukendi,100,jean@exemple.com,+243990000000,SL-0001,VIP-1\n' +
-  'Marie Kabasele,50,marie@exemple.com,+243991111111,,\n' +
-  'Patrick Ilunga,15000,,+243992222222,,\n'
+  'Jean Mukendi,VVIP,jean@exemple.com,+243990000000,SL-0001,VVIP-1\n' +
+  'Marie Kabasele,VIP,marie@exemple.com,+243991111111,,\n' +
+  'Patrick Ilunga,Standard,,+243992222222,,\n'
 
 export function downloadCsvTemplate() {
   const blob = new Blob([CSV_TEMPLATE], { type: 'text/csv;charset=utf-8' })
