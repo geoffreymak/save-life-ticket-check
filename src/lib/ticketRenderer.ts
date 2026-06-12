@@ -5,6 +5,18 @@ import { buildQrPayload } from "./crypto";
 import type { Ticket } from "./types";
 
 const imageCache = new Map<string, Promise<HTMLImageElement>>();
+const PDF_WIDTH_MM = 220;
+
+export type ExportPhase = "render" | "compress" | "download";
+
+export interface ExportProgress {
+  phase: ExportPhase;
+  done: number;
+  total: number;
+  percent?: number;
+}
+
+export type ExportProgressHandler = (progress: ExportProgress) => void;
 
 function loadImage(src: string): Promise<HTMLImageElement> {
   if (!imageCache.has(src)) {
@@ -59,13 +71,13 @@ export async function renderTicketCanvas(
   // QR haute correction d'erreur (robuste à l'impression / dégradations).
   const payload = buildQrPayload(ticket.id, ticket.secret);
   const qrSize = cfg.qr.size;
-  const qrDataUrl = await QRCode.toDataURL(payload, {
+  const qrCanvas = document.createElement("canvas");
+  await QRCode.toCanvas(qrCanvas, payload, {
     errorCorrectionLevel: "H",
     margin: 1,
-    scale: 12,
+    width: qrSize,
     color: { dark: "#111111", light: "#ffffff" },
   });
-  const qrImg = await loadImage(qrDataUrl);
 
   const pad = Math.round(qrSize * 0.12);
   const bgSize = qrSize + pad * 2;
@@ -83,12 +95,14 @@ export async function renderTicketCanvas(
   ctx.restore();
 
   ctx.drawImage(
-    qrImg,
+    qrCanvas,
     cfg.qr.cx - qrSize / 2,
     cfg.qr.cy - qrSize / 2,
     qrSize,
     qrSize,
   );
+  qrCanvas.width = 0;
+  qrCanvas.height = 0;
 
   return canvas;
 }
@@ -101,12 +115,14 @@ export function fileNameFor(ticket: Ticket): string {
 
 export async function ticketToPngBlob(ticket: Ticket): Promise<Blob> {
   const canvas = await renderTicketCanvas(ticket);
-  return new Promise((resolve, reject) =>
+  const blob = await new Promise<Blob>((resolve, reject) =>
     canvas.toBlob(
       (b) => (b ? resolve(b) : reject(new Error("toBlob a échoué"))),
       "image/png",
     ),
   );
+  releaseCanvas(canvas);
+  return blob;
 }
 
 export async function downloadTicketPng(ticket: Ticket): Promise<void> {
@@ -117,6 +133,7 @@ export async function downloadTicketPng(ticket: Ticket): Promise<void> {
 export async function downloadTicketPdf(ticket: Ticket): Promise<void> {
   const canvas = await renderTicketCanvas(ticket);
   const pdf = ticketCanvasToPdf([canvas]);
+  releaseCanvas(canvas);
   pdf.save(`${fileNameFor(ticket)}.pdf`);
 }
 
@@ -125,7 +142,7 @@ export function ticketCanvasToPdf(canvases: HTMLCanvasElement[]): jsPDF {
   const first = canvases[0];
   const ratio = first.height / first.width;
   // Largeur fixe en mm, hauteur proportionnelle.
-  const wMm = 220;
+  const wMm = PDF_WIDTH_MM;
   const hMm = wMm * ratio;
   const pdf = new jsPDF({
     orientation: "landscape",
@@ -140,14 +157,58 @@ export function ticketCanvasToPdf(canvases: HTMLCanvasElement[]): jsPDF {
   return pdf;
 }
 
+function addCanvasPage(pdf: jsPDF, canvas: HTMLCanvasElement, isFirst: boolean) {
+  const ratio = canvas.height / canvas.width;
+  const wMm = PDF_WIDTH_MM;
+  const hMm = wMm * ratio;
+  if (!isFirst) pdf.addPage([wMm, hMm], "landscape");
+  const data = canvas.toDataURL("image/jpeg", 0.9);
+  pdf.addImage(data, "JPEG", 0, 0, wMm, hMm);
+}
+
+function makePdfForCanvas(canvas: HTMLCanvasElement) {
+  const ratio = canvas.height / canvas.width;
+  const wMm = PDF_WIDTH_MM;
+  const hMm = wMm * ratio;
+  return new jsPDF({
+    orientation: "landscape",
+    unit: "mm",
+    format: [wMm, hMm],
+  });
+}
+
+function releaseCanvas(canvas: HTMLCanvasElement) {
+  canvas.width = 0;
+  canvas.height = 0;
+}
+
+function yieldToBrowser() {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, 0);
+  });
+}
+
 export async function downloadBatchPdf(
   tickets: Ticket[],
   name: string,
+  onProgress?: ExportProgressHandler,
 ): Promise<void> {
-  const canvases: HTMLCanvasElement[] = [];
-  for (const t of tickets) canvases.push(await renderTicketCanvas(t));
-  const pdf = ticketCanvasToPdf(canvases);
-  pdf.save(`${name}.pdf`);
+  if (tickets.length === 0) return;
+
+  let pdf: jsPDF | null = null;
+  const total = tickets.length;
+
+  for (let i = 0; i < total; i++) {
+    const canvas = await renderTicketCanvas(tickets[i]);
+    if (!pdf) pdf = makePdfForCanvas(canvas);
+    addCanvasPage(pdf, canvas, i === 0);
+    releaseCanvas(canvas);
+    onProgress?.({ phase: "render", done: i + 1, total });
+    if (i % 5 === 4) await yieldToBrowser();
+  }
+
+  onProgress?.({ phase: "download", done: total, total });
+  pdf!.save(`${name}.pdf`);
 }
 
 function triggerDownload(blob: Blob, filename: string) {

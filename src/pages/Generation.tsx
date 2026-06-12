@@ -13,10 +13,13 @@ import {
 import { parseCsv, downloadCsvTemplate, type ParsedRow } from "../lib/csv";
 import {
   createBatchWithTickets,
+  getTicketsByBatchPreview,
   getTicketsByBatch,
   listBatches,
+  TICKET_PREVIEW_LIMIT,
+  type BulkWriteProgress,
 } from "../lib/tickets";
-import { downloadBatchPdf } from "../lib/ticketRenderer";
+import { downloadBatchPdf, type ExportProgress } from "../lib/ticketRenderer";
 import { downloadBatchZipPdf, downloadBatchZipPng } from "../lib/exportZip";
 import { CATEGORIES, CATEGORY_LIST } from "../lib/categories";
 import { useAuth } from "../context/AuthContext";
@@ -25,6 +28,72 @@ import { Spinner } from "../components/Spinner";
 import type { Batch, Ticket } from "../lib/types";
 
 type Tab = "nouveau" | "lots";
+type UiProgress = {
+  title: string;
+  label: string;
+  done: number;
+  total: number;
+  percent: number;
+};
+type WakeLockSentinelLike = { release: () => Promise<void> };
+type NavigatorWithWakeLock = Navigator & {
+  wakeLock?: { request: (type: "screen") => Promise<WakeLockSentinelLike> };
+};
+
+const ROW_PREVIEW_LIMIT = 120;
+const GENERATED_PREVIEW_STEP = 12;
+
+async function withScreenWakeLock<T>(task: () => Promise<T>): Promise<T> {
+  let lock: WakeLockSentinelLike | null = null;
+  try {
+    lock = await (navigator as NavigatorWithWakeLock).wakeLock?.request(
+      "screen",
+    ) ?? null;
+  } catch {
+    lock = null;
+  }
+
+  try {
+    return await task();
+  } finally {
+    if (lock) await lock.release().catch(() => {});
+  }
+}
+
+function formatExportProgress(title: string, progress: ExportProgress): UiProgress {
+  const percent =
+    progress.percent ??
+    (progress.total ? Math.round((progress.done / progress.total) * 100) : 0);
+  const label =
+    progress.phase === "compress"
+      ? "Preparation du fichier"
+      : progress.phase === "download"
+        ? "Ouverture du telechargement"
+        : "Generation des billets";
+  return {
+    title,
+    label,
+    done: progress.done,
+    total: progress.total,
+    percent: Math.max(0, Math.min(100, percent)),
+  };
+}
+
+function formatWriteProgress(progress: BulkWriteProgress): UiProgress {
+  const percent = progress.total
+    ? Math.round((progress.done / progress.total) * 100)
+    : 0;
+  return {
+    title: "Creation du lot",
+    label:
+      progress.phase === "preparing"
+        ? "Preparation des billets"
+        : `Ecriture Firestore ${progress.batchesDone || 0}/${progress.batchesTotal || 0}`,
+    done: progress.done,
+    total: progress.total,
+    percent,
+  };
+}
 
 export default function GenerationPage() {
   const { appUser } = useAuth();
@@ -78,6 +147,110 @@ function CategoryLegend() {
   );
 }
 
+function ProgressCard({
+  progress,
+  className = "",
+}: {
+  progress: UiProgress;
+  className?: string;
+}) {
+  return (
+    <div className={`rounded-xl bg-white p-4 ring-1 ring-black/5 ${className}`}>
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-bold text-brand-ink">
+            {progress.title}
+          </p>
+          <p className="truncate text-xs text-brand-ink/55">
+            {progress.label}
+          </p>
+        </div>
+        <span className="shrink-0 text-sm font-extrabold text-brand-red">
+          {Math.round(progress.percent)}%
+        </span>
+      </div>
+      <div className="h-2.5 overflow-hidden rounded-full bg-black/10">
+        <div
+          className="h-full rounded-full bg-brand-red transition-all"
+          style={{ width: `${progress.percent}%` }}
+        />
+      </div>
+      <p className="mt-2 text-xs text-brand-ink/50">
+        {progress.done}/{progress.total}
+      </p>
+    </div>
+  );
+}
+
+function TicketCompactList({
+  tickets,
+  total,
+  previewLimit,
+}: {
+  tickets: Ticket[];
+  total: number;
+  previewLimit: number;
+}) {
+  return (
+    <div className="min-w-0">
+      <div className="mb-3 flex min-w-0 flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <p className="font-semibold text-brand-ink">Liste rapide</p>
+          <p className="text-sm text-brand-ink/50">
+            {tickets.length}/{total} billets charges. Les exports utilisent le lot complet.
+          </p>
+        </div>
+      </div>
+      <div className="overflow-hidden rounded-xl border border-black/5 bg-white">
+        <div className="hidden grid-cols-[1.3fr_0.8fr_0.7fr_0.6fr] gap-3 bg-brand-cream/80 px-3 py-2 text-xs font-bold uppercase text-brand-ink/50 sm:grid">
+          <span>Nom</span>
+          <span>Reference</span>
+          <span>Categorie</span>
+          <span>Statut</span>
+        </div>
+        <div className="divide-y divide-black/5">
+          {tickets.map((ticket) => {
+            const cfg = CATEGORIES[ticket.category];
+            return (
+              <div
+                key={ticket.id}
+                className="grid gap-2 px-3 py-2.5 text-sm sm:grid-cols-[1.3fr_0.8fr_0.7fr_0.6fr] sm:items-center"
+              >
+                <p className="min-w-0 truncate font-semibold text-brand-ink">
+                  {ticket.holderName}
+                </p>
+                <p className="truncate text-brand-ink/55">
+                  {ticket.reference || ticket.id}
+                </p>
+                <span
+                  className="w-fit rounded px-1.5 py-0.5 text-xs font-bold"
+                  style={{ background: cfg.accent, color: cfg.accentText }}
+                >
+                  {cfg.price}
+                </span>
+                <span
+                  className={`text-xs font-bold ${
+                    ticket.status === "used"
+                      ? "text-emerald-600"
+                      : "text-brand-ink/45"
+                  }`}
+                >
+                  {ticket.status === "used" ? "Entre" : "Valide"}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      {total > previewLimit && (
+        <p className="mt-2 text-xs text-brand-ink/45">
+          Apercu limite a {previewLimit} billets pour garder l'app rapide.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function NewImport({ user }: { user: { uid: string; email: string } }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [fileName, setFileName] = useState("");
@@ -85,20 +258,28 @@ function NewImport({ user }: { user: { uid: string; email: string } }) {
   const [batchName, setBatchName] = useState("");
   const [generating, setGenerating] = useState(false);
   const [generated, setGenerated] = useState<Ticket[] | null>(null);
-  const [exporting, setExporting] = useState(false);
-  const [zipping, setZipping] = useState<{
-    kind: "png" | "pdf";
-    done: number;
-    total: number;
-  } | null>(null);
+  const [generatedPreviewLimit, setGeneratedPreviewLimit] = useState(
+    GENERATED_PREVIEW_STEP,
+  );
+  const [generateProgress, setGenerateProgress] = useState<UiProgress | null>(
+    null,
+  );
+  const [exportJob, setExportJob] = useState<UiProgress | null>(null);
   const [error, setError] = useState("");
 
   const validRows = useMemo(() => rows.filter((r) => r.valid), [rows]);
   const errorRows = useMemo(() => rows.filter((r) => !r.valid), [rows]);
+  const previewRows = useMemo(
+    () => rows.slice(0, ROW_PREVIEW_LIMIT),
+    [rows],
+  );
 
   function handleFile(file: File) {
     setError("");
     setGenerated(null);
+    setGenerateProgress(null);
+    setExportJob(null);
+    setGeneratedPreviewLimit(GENERATED_PREVIEW_STEP);
     setFileName(file.name);
     if (!batchName) setBatchName(file.name.replace(/\.csv$/i, ""));
     const reader = new FileReader();
@@ -119,6 +300,13 @@ function NewImport({ user }: { user: { uid: string; email: string } }) {
     if (validRows.length === 0) return;
     setGenerating(true);
     setError("");
+    setGenerateProgress({
+      title: "Creation du lot",
+      label: "Preparation des billets",
+      done: 0,
+      total: validRows.length,
+      percent: 0,
+    });
     try {
       const { tickets } = await createBatchWithTickets(
         batchName.trim() || `Lot du ${new Date().toLocaleDateString("fr-FR")}`,
@@ -131,7 +319,9 @@ function NewImport({ user }: { user: { uid: string; email: string } }) {
           seat: r.seat,
         })),
         user,
+        (progress) => setGenerateProgress(formatWriteProgress(progress)),
       );
+      setGeneratedPreviewLimit(GENERATED_PREVIEW_STEP);
       setGenerated(tickets);
     } catch (e) {
       console.error(e);
@@ -140,41 +330,68 @@ function NewImport({ user }: { user: { uid: string; email: string } }) {
       );
     } finally {
       setGenerating(false);
+      setGenerateProgress(null);
     }
   }
 
   async function exportAllPdf() {
     if (!generated) return;
-    setExporting(true);
+    const title = "PDF complet";
+    setExportJob({
+      title,
+      label: "Preparation",
+      done: 0,
+      total: generated.length,
+      percent: 0,
+    });
     try {
-      await downloadBatchPdf(generated, batchName.trim() || "billets");
+      await withScreenWakeLock(() =>
+        downloadBatchPdf(generated, batchName.trim() || "billets", (p) =>
+          setExportJob(formatExportProgress(title, p)),
+        ),
+      );
     } finally {
-      setExporting(false);
+      setExportJob(null);
     }
   }
 
   async function exportAllZip(kind: "png" | "pdf") {
     if (!generated) return;
-    setZipping({ kind, done: 0, total: generated.length });
+    const title = kind === "png" ? "ZIP PNG" : "ZIP PDF";
+    setExportJob({
+      title,
+      label: "Preparation",
+      done: 0,
+      total: generated.length,
+      percent: 0,
+    });
     const fn = kind === "png" ? downloadBatchZipPng : downloadBatchZipPdf;
     try {
-      await fn(generated, batchName.trim() || "billets", (done, total) =>
-        setZipping({ kind, done, total }),
+      await withScreenWakeLock(() =>
+        fn(generated, batchName.trim() || "billets", (p) =>
+          setExportJob(formatExportProgress(title, p)),
+        ),
       );
     } finally {
-      setZipping(null);
+      setExportJob(null);
     }
   }
 
   function reset() {
     setRows([]);
     setGenerated(null);
+    setGenerateProgress(null);
+    setExportJob(null);
+    setGeneratedPreviewLimit(GENERATED_PREVIEW_STEP);
     setFileName("");
     setBatchName("");
     if (fileRef.current) fileRef.current.value = "";
   }
 
   if (generated) {
+    const visibleGenerated = generated.slice(0, generatedPreviewLimit);
+    const isExporting = exportJob !== null;
+
     return (
       <div>
         <div className="card mb-5 grid gap-3 bg-emerald-50 ring-emerald-200 sm:flex sm:flex-wrap sm:items-center sm:justify-between">
@@ -192,10 +409,10 @@ function NewImport({ user }: { user: { uid: string; email: string } }) {
           <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
             <button
               className="btn-primary w-full sm:w-auto"
-              disabled={exporting}
+              disabled={isExporting}
               onClick={exportAllPdf}
             >
-              {exporting ? (
+              {isExporting ? (
                 <Loader2 size={16} className="animate-spin" />
               ) : (
                 <FileText size={16} />
@@ -204,31 +421,27 @@ function NewImport({ user }: { user: { uid: string; email: string } }) {
             </button>
             <button
               className="btn-gold w-full sm:w-auto"
-              disabled={zipping !== null}
+              disabled={isExporting}
               onClick={() => exportAllZip("pdf")}
             >
-              {zipping?.kind === "pdf" ? (
+              {isExporting ? (
                 <Loader2 size={16} className="animate-spin" />
               ) : (
                 <FileArchive size={16} />
               )}
-              {zipping?.kind === "pdf"
-                ? `PDF ${zipping.done}/${zipping.total}`
-                : "PDF (.zip)"}
+              PDF (.zip)
             </button>
             <button
               className="btn-gold w-full sm:w-auto"
-              disabled={zipping !== null}
+              disabled={isExporting}
               onClick={() => exportAllZip("png")}
             >
-              {zipping?.kind === "png" ? (
+              {isExporting ? (
                 <Loader2 size={16} className="animate-spin" />
               ) : (
                 <FileArchive size={16} />
               )}
-              {zipping?.kind === "png"
-                ? `PNG ${zipping.done}/${zipping.total}`
-                : "PNG (.zip)"}
+              PNG (.zip)
             </button>
             <button className="btn-ghost col-span-2 w-full sm:col-span-1 sm:w-auto" onClick={reset}>
               Nouvel import
@@ -236,8 +449,31 @@ function NewImport({ user }: { user: { uid: string; email: string } }) {
           </div>
         </div>
 
+        {exportJob && <ProgressCard progress={exportJob} className="mb-5" />}
+
+        <div className="mb-3 flex min-w-0 flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+          <div className="min-w-0">
+            <p className="font-semibold text-brand-ink">Apercu rapide</p>
+            <p className="text-sm text-brand-ink/50">
+              {visibleGenerated.length}/{generated.length} billets affiches pour garder la page fluide.
+            </p>
+          </div>
+          {visibleGenerated.length < generated.length && (
+            <button
+              className="btn-ghost w-full text-xs sm:w-auto"
+              onClick={() =>
+                setGeneratedPreviewLimit((n) =>
+                  Math.min(n + GENERATED_PREVIEW_STEP, generated.length),
+                )
+              }
+            >
+              Afficher {Math.min(GENERATED_PREVIEW_STEP, generated.length - visibleGenerated.length)} de plus
+            </button>
+          )}
+        </div>
+
         <div className="grid min-w-0 gap-4 sm:grid-cols-2 xl:grid-cols-2">
-          {generated.map((t) => (
+          {visibleGenerated.map((t) => (
             <TicketPreview key={t.id} ticket={t} />
           ))}
         </div>
@@ -300,11 +536,13 @@ function NewImport({ user }: { user: { uid: string; email: string } }) {
         )}
 
         {/* Aperçu des données */}
+        {generateProgress && <ProgressCard progress={generateProgress} />}
+
         {rows.length > 0 && (
           <div className="card p-0">
             <div className="flex items-center justify-between px-4 py-3">
               <p className="font-semibold text-brand-ink">
-                Aperçu ({rows.length} lignes)
+                Apercu ({previewRows.length}/{rows.length} lignes)
               </p>
               <div className="flex gap-2 text-xs">
                 <span className="rounded-full bg-emerald-100 px-2.5 py-1 font-semibold text-emerald-700">
@@ -318,7 +556,7 @@ function NewImport({ user }: { user: { uid: string; email: string } }) {
               </div>
             </div>
             <div className="divide-y divide-black/5 sm:hidden">
-              {rows.map((r) => (
+              {previewRows.map((r) => (
                 <div key={r.line} className={r.valid ? "p-4" : "bg-red-50/50 p-4"}>
                   <div className="mb-2 flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -378,7 +616,7 @@ function NewImport({ user }: { user: { uid: string; email: string } }) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-black/5">
-                  {rows.map((r) => (
+                  {previewRows.map((r) => (
                     <tr key={r.line} className={r.valid ? "" : "bg-red-50/50"}>
                       <td className="px-4 py-2 text-brand-ink/40">{r.line}</td>
                       <td className="px-4 py-2 font-medium text-brand-ink">
@@ -493,13 +731,9 @@ function ExistingBatches() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loadingTickets, setLoadingTickets] = useState(false);
-  const [exporting, setExporting] = useState<string | null>(null);
-  const [zipping, setZipping] = useState<{
+  const [exportJob, setExportJob] = useState<({
     id: string;
-    kind: "png" | "pdf";
-    done: number;
-    total: number;
-  } | null>(null);
+  } & UiProgress) | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -517,37 +751,54 @@ function ExistingBatches() {
     setOpenId(batch.id);
     setLoadingTickets(true);
     try {
-      setTickets(await getTicketsByBatch(batch.id));
+      setTickets(await getTicketsByBatchPreview(batch.id));
     } finally {
       setLoadingTickets(false);
     }
   }
 
-  async function listFor(batch: Batch) {
-    return tickets.length && openId === batch.id
-      ? tickets
-      : await getTicketsByBatch(batch.id);
-  }
-
   async function exportAll(batch: Batch) {
-    setExporting(batch.id);
+    const title = "PDF complet";
+    setExportJob({
+      id: batch.id,
+      title,
+      label: "Chargement des billets",
+      done: 0,
+      total: batch.count,
+      percent: 0,
+    });
     try {
-      await downloadBatchPdf(await listFor(batch), batch.name);
+      await withScreenWakeLock(async () => {
+        const list = await getTicketsByBatch(batch.id);
+        await downloadBatchPdf(list, batch.name, (p) =>
+          setExportJob({ id: batch.id, ...formatExportProgress(title, p) }),
+        );
+      });
     } finally {
-      setExporting(null);
+      setExportJob(null);
     }
   }
 
   async function exportZip(batch: Batch, kind: "png" | "pdf") {
-    const list = await listFor(batch);
-    setZipping({ id: batch.id, kind, done: 0, total: list.length });
+    const title = kind === "png" ? "ZIP PNG" : "ZIP PDF";
+    setExportJob({
+      id: batch.id,
+      title,
+      label: "Chargement des billets",
+      done: 0,
+      total: batch.count,
+      percent: 0,
+    });
     const fn = kind === "png" ? downloadBatchZipPng : downloadBatchZipPdf;
     try {
-      await fn(list, batch.name, (done, total) =>
-        setZipping({ id: batch.id, kind, done, total }),
-      );
+      await withScreenWakeLock(async () => {
+        const list = await getTicketsByBatch(batch.id);
+        await fn(list, batch.name, (p) =>
+          setExportJob({ id: batch.id, ...formatExportProgress(title, p) }),
+        );
+      });
     } finally {
-      setZipping(null);
+      setExportJob(null);
     }
   }
 
@@ -569,7 +820,9 @@ function ExistingBatches() {
 
   return (
     <div className="min-w-0 space-y-3">
-      {batches.map((b) => (
+      {batches.map((b) => {
+        const isBatchExporting = exportJob?.id === b.id;
+        return (
         <div key={b.id} className="card p-0">
           <div className="grid gap-3 px-4 py-3 sm:flex sm:flex-wrap sm:items-center sm:justify-between">
             <div className="min-w-0">
@@ -581,10 +834,10 @@ function ExistingBatches() {
             <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
               <button
                 className="btn-ghost w-full text-xs sm:w-auto"
-                disabled={exporting === b.id}
+                disabled={isBatchExporting}
                 onClick={() => exportAll(b)}
               >
-                {exporting === b.id ? (
+                {isBatchExporting ? (
                   <Loader2 size={14} className="animate-spin" />
                 ) : (
                   <FileText size={14} />
@@ -593,31 +846,27 @@ function ExistingBatches() {
               </button>
               <button
                 className="btn-gold w-full text-xs sm:w-auto"
-                disabled={zipping?.id === b.id}
+                disabled={isBatchExporting}
                 onClick={() => exportZip(b, "pdf")}
               >
-                {zipping?.id === b.id && zipping.kind === "pdf" ? (
+                {isBatchExporting ? (
                   <Loader2 size={14} className="animate-spin" />
                 ) : (
                   <FileArchive size={14} />
                 )}{" "}
-                {zipping?.id === b.id && zipping.kind === "pdf"
-                  ? `${zipping.done}/${zipping.total}`
-                  : "PDF .zip"}
+                PDF .zip
               </button>
               <button
                 className="btn-gold w-full text-xs sm:w-auto"
-                disabled={zipping?.id === b.id}
+                disabled={isBatchExporting}
                 onClick={() => exportZip(b, "png")}
               >
-                {zipping?.id === b.id && zipping.kind === "png" ? (
+                {isBatchExporting ? (
                   <Loader2 size={14} className="animate-spin" />
                 ) : (
                   <FileArchive size={14} />
                 )}{" "}
-                {zipping?.id === b.id && zipping.kind === "png"
-                  ? `${zipping.done}/${zipping.total}`
-                  : "PNG .zip"}
+                PNG .zip
               </button>
               <button
                 className="btn-primary col-span-2 w-full text-xs sm:col-span-1 sm:w-auto"
@@ -627,21 +876,27 @@ function ExistingBatches() {
               </button>
             </div>
           </div>
+          {isBatchExporting && exportJob && (
+            <div className="border-t border-black/5 p-4">
+              <ProgressCard progress={exportJob} />
+            </div>
+          )}
           {openId === b.id && (
             <div className="border-t border-black/5 p-4">
               {loadingTickets ? (
                 <Spinner label="Chargement des billets…" />
               ) : (
-                <div className="grid gap-4 sm:grid-cols-2">
-                  {tickets.map((t) => (
-                    <TicketPreview key={t.id} ticket={t} />
-                  ))}
-                </div>
+                <TicketCompactList
+                  tickets={tickets}
+                  total={b.count}
+                  previewLimit={TICKET_PREVIEW_LIMIT}
+                />
               )}
             </div>
           )}
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

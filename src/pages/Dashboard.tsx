@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   CheckCircle2,
@@ -20,55 +20,91 @@ import {
   YAxis,
 } from "recharts";
 import {
-  computeStats,
+  getEventStats,
   subscribeRecentScans,
-  subscribeTickets,
+  type ComputedStats,
   type LiveScan,
 } from "../lib/stats";
+import { getTicketsByIds } from "../lib/tickets";
 import { CATEGORIES, CATEGORY_LIST } from "../lib/categories";
 import { Spinner } from "../components/Spinner";
 import type { Ticket } from "../lib/types";
 
 export default function DashboardPage() {
-  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const ticketCacheRef = useRef<Map<string, Ticket>>(new Map());
+  const [stats, setStats] = useState<ComputedStats | null>(null);
+  const [scanTickets, setScanTickets] = useState<Map<string, Ticket>>(
+    () => new Map(),
+  );
   const [scans, setScans] = useState<LiveScan[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [updatedAt, setUpdatedAt] = useState<number>(Date.now());
 
   useEffect(() => {
-    const unsubT = subscribeTickets(
-      (t) => {
-        setTickets(t);
+    let disposed = false;
+    let refreshTimer: number | null = null;
+
+    async function refreshStats() {
+      try {
+        const next = await getEventStats();
+        if (disposed) return;
+        setStats(next);
         setLoading(false);
         setUpdatedAt(Date.now());
-      },
-      () => {
+      } catch {
+        if (disposed) return;
         setError(
           "Impossible de charger les statistiques (droits insuffisants ?).",
         );
         setLoading(false);
-      },
-    );
+      }
+    }
+
+    async function hydrateScanTickets(items: LiveScan[]) {
+      const missing = [
+        ...new Set(
+          items
+            .map((scan) => scan.ticketId)
+            .filter((id) => id && !ticketCacheRef.current.has(id)),
+        ),
+      ];
+      if (missing.length === 0) return;
+      try {
+        const fetched = await getTicketsByIds(missing);
+        if (disposed) return;
+        setScanTickets((prev) => {
+          const next = new Map(prev);
+          fetched.forEach((ticket) => next.set(ticket.id, ticket));
+          ticketCacheRef.current = next;
+          return next;
+        });
+      } catch {
+        /* Le flux live reste utile meme si les details ticket manquent. */
+      }
+    }
+
+    refreshStats();
     const unsubS = subscribeRecentScans(
-      (s) => setScans(s),
+      (s) => {
+        setScans(s);
+        hydrateScanTickets(s);
+        if (refreshTimer) window.clearTimeout(refreshTimer);
+        refreshTimer = window.setTimeout(refreshStats, 1500);
+      },
       60,
       () => {},
     );
     return () => {
-      unsubT();
+      disposed = true;
+      if (refreshTimer) window.clearTimeout(refreshTimer);
       unsubS();
     };
   }, []);
 
-  const stats = useMemo(() => computeStats(tickets, scans), [tickets, scans]);
-  const ticketMap = useMemo(() => {
-    const m = new Map<string, Ticket>();
-    for (const t of tickets) m.set(t.id, t);
-    return m;
-  }, [tickets]);
+  const ticketMap = useMemo(() => scanTickets, [scanTickets]);
 
-  if (loading)
+  if (loading || !stats)
     return <Spinner label="Connexion aux statistiques en temps réel…" />;
   if (error)
     return (

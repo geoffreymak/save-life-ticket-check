@@ -1,10 +1,14 @@
 import {
   collection,
   collectionGroup,
+  getCountFromServer,
   limit,
   onSnapshot,
   orderBy,
   query,
+  where,
+  type DocumentData,
+  type Query,
   type Timestamp,
 } from "firebase/firestore";
 import { CATEGORY_LIST } from "./categories";
@@ -81,12 +85,88 @@ export interface ComputedStats {
   refusedScans: number;
 }
 
+export function emptyStats(): ComputedStats {
+  const byCategory = CATEGORY_LIST.reduce(
+    (acc, cat) => {
+      acc[cat.id] = {
+        id: cat.id,
+        total: 0,
+        used: 0,
+        remaining: 0,
+      };
+      return acc;
+    },
+    {} as Record<CategoryId, CategoryStat>,
+  );
+
+  return {
+    total: 0,
+    used: 0,
+    remaining: 0,
+    byCategory,
+    scansTotal: 0,
+    admittedScans: 0,
+    refusedScans: 0,
+  };
+}
+
 const EMPTY_CAT = (id: CategoryId): CategoryStat => ({
   id,
   total: 0,
   used: 0,
   remaining: 0,
 });
+
+async function countQuery(q: Query<DocumentData>) {
+  const snap = await getCountFromServer(q);
+  return snap.data().count;
+}
+
+export async function getEventStats(): Promise<ComputedStats> {
+  const base = collection(db, "tickets");
+  const stats = emptyStats();
+
+  const [total, used, refusedScans] = await Promise.all([
+    countQuery(query(base)),
+    countQuery(query(base, where("status", "==", "used"))),
+    countQuery(
+      query(collectionGroup(db, "scans"), where("result", "==", "already_used")),
+    ),
+  ]);
+
+  const categoryCounts = await Promise.all(
+    CATEGORY_LIST.flatMap((cat) => [
+      countQuery(query(base, where("category", "==", cat.id))),
+      countQuery(
+        query(
+          base,
+          where("category", "==", cat.id),
+          where("status", "==", "used"),
+        ),
+      ),
+    ]),
+  );
+
+  CATEGORY_LIST.forEach((cat, index) => {
+    const totalForCategory = categoryCounts[index * 2] || 0;
+    const usedForCategory = categoryCounts[index * 2 + 1] || 0;
+    stats.byCategory[cat.id] = {
+      id: cat.id,
+      total: totalForCategory,
+      used: usedForCategory,
+      remaining: totalForCategory - usedForCategory,
+    };
+  });
+
+  stats.total = total;
+  stats.used = used;
+  stats.remaining = total - used;
+  stats.admittedScans = used;
+  stats.refusedScans = refusedScans;
+  stats.scansTotal = used + refusedScans;
+
+  return stats;
+}
 
 export function computeStats(
   tickets: Ticket[],

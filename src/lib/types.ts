@@ -31,6 +31,7 @@ export interface Ticket {
   email?: string;
   phone?: string;
   reference?: string; // numéro de billet lisible (ex: SL-0001)
+  referenceKey?: string;
   seat?: string;
   batchId: string;
   status: TicketStatus;

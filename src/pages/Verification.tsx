@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AlertOctagon,
   CheckCircle2,
@@ -17,11 +17,14 @@ import {
 } from "lucide-react";
 import { QrScanner } from "../components/QrScanner";
 import { buildQrPayload, parseQrPayload } from "../lib/crypto";
-import { scanTicket, type ScanResult } from "../lib/tickets";
+import {
+  findTicketByReferenceOrId,
+  scanTicket,
+  type ScanResult,
+} from "../lib/tickets";
 import { CATEGORIES, CATEGORY_LIST } from "../lib/categories";
-import { computeStats, subscribeTickets } from "../lib/stats";
+import { getEventStats, type ComputedStats } from "../lib/stats";
 import { useAuth } from "../context/AuthContext";
-import type { Ticket } from "../lib/types";
 import type { Timestamp } from "firebase/firestore";
 
 interface DisplayResult extends ScanResult {
@@ -89,9 +92,10 @@ export default function VerificationPage() {
   const [history, setHistory] = useState<DisplayResult[]>([]);
   const [manual, setManual] = useState("");
   const [autoMode, setAutoMode] = useState(true);
-  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [live, setLive] = useState<ComputedStats | null>(null);
   const [searchRef, setSearchRef] = useState("");
   const [searchMsg, setSearchMsg] = useState("");
+  const [searching, setSearching] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
   const [focusMenuOpen, setFocusMenuOpen] = useState(false);
   const scannerShellRef = useRef<HTMLDivElement>(null);
@@ -99,10 +103,16 @@ export default function VerificationPage() {
 
   // Stats globales temps réel (tous les billets de l'événement).
   useEffect(() => {
-    const unsub = subscribeTickets(setTickets, () => {});
-    return () => unsub();
+    let cancelled = false;
+    getEventStats()
+      .then((stats) => {
+        if (!cancelled) setLive(stats);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, []);
-  const live = useMemo(() => computeStats(tickets, []), [tickets]);
 
   const stats = {
     admitted: history.filter((h) => h.result === "admitted").length,
@@ -145,21 +155,51 @@ export default function VerificationPage() {
     }
   }
 
-  function searchByReference(e: React.FormEvent) {
+  async function searchByReference(e: React.FormEvent) {
     e.preventDefault();
     setSearchMsg("");
-    const ref = searchRef.trim().toLowerCase();
+    const ref = searchRef.trim();
     if (!ref) return;
-    const found = tickets.find(
-      (t) =>
-        (t.reference || "").toLowerCase() === ref || t.id.toLowerCase() === ref,
-    );
-    if (!found) {
+    setSearching(true);
+    try {
+      const found = await findTicketByReferenceOrId(ref);
+      if (!found) {
       setSearchMsg("Aucun billet trouvé pour cette référence.");
-      return;
+        return;
+      }
+      setSearchRef("");
+      process(buildQrPayload(found.id, found.secret));
+    } catch {
+      setSearchMsg("Recherche impossible pour le moment.");
+    } finally {
+      setSearching(false);
     }
-    setSearchRef("");
-    process(buildQrPayload(found.id, found.secret));
+  }
+
+  function updateLiveAfterScan(res: ScanResult) {
+    setLive((prev) => {
+      if (!prev) return prev;
+      const next: ComputedStats = {
+        ...prev,
+        byCategory: { ...prev.byCategory },
+      };
+
+      if (res.result === "admitted" && res.ticket) {
+        const cat = { ...next.byCategory[res.ticket.category] };
+        cat.used += 1;
+        cat.remaining = Math.max(0, cat.total - cat.used);
+        next.byCategory[res.ticket.category] = cat;
+        next.used += 1;
+        next.remaining = Math.max(0, next.total - next.used);
+        next.admittedScans += 1;
+        next.scansTotal += 1;
+      } else if (res.result === "already_used") {
+        next.refusedScans += 1;
+        next.scansTotal += 1;
+      }
+
+      return next;
+    });
   }
 
   async function process(text: string) {
@@ -182,6 +222,7 @@ export default function VerificationPage() {
       const display: DisplayResult = { ...res, at: Date.now() };
       setResult(display);
       setHistory((prev) => [display, ...prev].slice(0, 30));
+      updateLiveAfterScan(res);
       beep(res.result === "admitted");
     } catch (e) {
       console.error(e);
@@ -354,7 +395,7 @@ export default function VerificationPage() {
                   {stats.admitted} admis · {stats.refused} refusés
                 </p>
                 <p className="truncate text-white/60">
-                  Global : {live.used}/{live.total} entrés
+                  Global : {live?.used ?? 0}/{live?.total ?? 0} entres
                 </p>
               </div>
               <button
@@ -406,8 +447,12 @@ export default function VerificationPage() {
                   </p>
                 )}
               </div>
-              <button type="submit" className="btn-ghost" disabled={processing}>
-                OK
+              <button
+                type="submit"
+                className="btn-ghost"
+                disabled={processing || searching}
+              >
+                {searching ? "..." : "OK"}
               </button>
             </form>
           </div>
@@ -470,9 +515,9 @@ export default function VerificationPage() {
           <button
             type="submit"
             className="btn-ghost w-full sm:w-auto"
-            disabled={processing}
+            disabled={processing || searching}
           >
-            Valider
+            {searching ? "Recherche..." : "Valider"}
           </button>
         </form>
       </div>
@@ -487,20 +532,25 @@ export default function VerificationPage() {
               réel)
             </p>
             <span className="text-sm font-bold text-brand-ink">
-              {live.used}/{live.total}
+              {live?.used ?? 0}/{live?.total ?? 0}
             </span>
           </div>
           <div className="h-2.5 w-full overflow-hidden rounded-full bg-black/10">
             <div
               className="h-full rounded-full bg-emerald-600 transition-all"
               style={{
-                width: `${live.total ? (live.used / live.total) * 100 : 0}%`,
+                width: `${live?.total ? ((live?.used ?? 0) / live.total) * 100 : 0}%`,
               }}
             />
           </div>
           <div className="mt-3 space-y-1.5">
             {CATEGORY_LIST.map((c) => {
-              const s = live.byCategory[c.id];
+              const s = live?.byCategory[c.id] ?? {
+                id: c.id,
+                total: 0,
+                used: 0,
+                remaining: 0,
+              };
               return (
                 <div
                   key={c.id}

@@ -2,6 +2,7 @@ import {
   addDoc,
   collection,
   doc,
+  documentId,
   getDoc,
   getDocs,
   limit,
@@ -28,22 +29,33 @@ export interface NewTicketInput {
 }
 
 const FIRESTORE_BATCH_LIMIT = 450
+export const TICKET_PREVIEW_LIMIT = 120
+
+export interface BulkWriteProgress {
+  phase: 'preparing' | 'writing'
+  done: number
+  total: number
+  batchesDone?: number
+  batchesTotal?: number
+}
 
 /** Crée un lot + tous ses billets de façon atomique (par tranches). */
 export async function createBatchWithTickets(
   batchName: string,
   rows: NewTicketInput[],
   user: { uid: string; email: string },
+  onProgress?: (progress: BulkWriteProgress) => void,
 ): Promise<{ batchId: string; tickets: Ticket[] }> {
   const batchRef = doc(collection(db, 'batches'))
   const batchId = batchRef.id
-  const createdAt = serverTimestamp()
+  const createdAt = Timestamp.now()
 
   const prepared = rows.map((r, i) => {
     const ref = doc(collection(db, 'tickets'))
     const reference = r.reference?.trim() || `SL-${String(i + 1).padStart(4, '0')}`
-    return { ref, reference, input: r }
+    return { ref, reference, secret: randomSecret(), input: r }
   })
+  onProgress?.({ phase: 'preparing', done: 0, total: prepared.length })
 
   // Écriture du lot d'abord.
   await setDoc(batchRef, {
@@ -55,17 +67,20 @@ export async function createBatchWithTickets(
   })
 
   // Tickets par tranches (limite Firestore 500 ops/batch).
+  let done = 0
+  const batchesTotal = Math.ceil(prepared.length / FIRESTORE_BATCH_LIMIT)
   for (let i = 0; i < prepared.length; i += FIRESTORE_BATCH_LIMIT) {
     const slice = prepared.slice(i, i + FIRESTORE_BATCH_LIMIT)
     const wb = writeBatch(db)
     for (const p of slice) {
       wb.set(p.ref, {
-        secret: randomSecret(),
+        secret: p.secret,
         holderName: p.input.holderName,
         category: p.input.category,
         email: p.input.email || '',
         phone: p.input.phone || '',
         reference: p.reference,
+        referenceKey: p.reference.toLowerCase(),
         seat: p.input.seat || '',
         batchId,
         status: 'valid',
@@ -75,10 +90,33 @@ export async function createBatchWithTickets(
       })
     }
     await wb.commit()
+    done += slice.length
+    onProgress?.({
+      phase: 'writing',
+      done,
+      total: prepared.length,
+      batchesDone: Math.ceil((i + slice.length) / FIRESTORE_BATCH_LIMIT),
+      batchesTotal,
+    })
   }
 
-  // Relecture pour récupérer les champs résolus (secret, timestamps).
-  const tickets = await getTicketsByBatch(batchId)
+  // Retour local : evite une relecture couteuse de tout le lot apres ecriture.
+  const tickets: Ticket[] = prepared.map((p) => ({
+    id: p.ref.id,
+    secret: p.secret,
+    holderName: p.input.holderName,
+    category: p.input.category,
+    email: p.input.email || '',
+    phone: p.input.phone || '',
+    reference: p.reference,
+    referenceKey: p.reference.toLowerCase(),
+    seat: p.input.seat || '',
+    batchId,
+    status: 'valid',
+    createdAt,
+    createdBy: user.uid,
+    scanCount: 0,
+  }))
   return { batchId, tickets }
 }
 
@@ -86,6 +124,72 @@ export async function getTicketsByBatch(batchId: string): Promise<Ticket[]> {
   const q = query(collection(db, 'tickets'), where('batchId', '==', batchId))
   const snap = await getDocs(q)
   return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Ticket, 'id'>) }))
+}
+
+export async function getTicketsByBatchPreview(
+  batchId: string,
+  count = TICKET_PREVIEW_LIMIT,
+): Promise<Ticket[]> {
+  const q = query(
+    collection(db, 'tickets'),
+    where('batchId', '==', batchId),
+    limit(count),
+  )
+  const snap = await getDocs(q)
+  return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Ticket, 'id'>) }))
+}
+
+export async function getTicketsByIds(ids: string[]): Promise<Ticket[]> {
+  const unique = [...new Set(ids.filter(Boolean))]
+  if (unique.length === 0) return []
+
+  const result: Ticket[] = []
+  for (let i = 0; i < unique.length; i += 30) {
+    const chunk = unique.slice(i, i + 30)
+    const q = query(collection(db, 'tickets'), where(documentId(), 'in', chunk))
+    const snap = await getDocs(q)
+    result.push(
+      ...snap.docs.map((d) => ({
+        id: d.id,
+        ...(d.data() as Omit<Ticket, 'id'>),
+      })),
+    )
+  }
+  return result
+}
+
+export async function findTicketByReferenceOrId(
+  value: string,
+): Promise<Ticket | null> {
+  const raw = value.trim()
+  if (!raw) return null
+
+  const byId = await getTicket(raw)
+  if (byId) return byId
+
+  const byKey = await getDocs(
+    query(
+      collection(db, 'tickets'),
+      where('referenceKey', '==', raw.toLowerCase()),
+      limit(1),
+    ),
+  )
+  if (!byKey.empty) {
+    const d = byKey.docs[0]
+    return { id: d.id, ...(d.data() as Omit<Ticket, 'id'>) }
+  }
+
+  const variants = [...new Set([raw, raw.toUpperCase(), raw.toLowerCase()])]
+  const byReference = await getDocs(
+    query(
+      collection(db, 'tickets'),
+      where('reference', 'in', variants),
+      limit(1),
+    ),
+  )
+  if (byReference.empty) return null
+  const d = byReference.docs[0]
+  return { id: d.id, ...(d.data() as Omit<Ticket, 'id'>) }
 }
 
 export async function listBatches(): Promise<Batch[]> {
@@ -213,6 +317,7 @@ export async function createAddOn(
     email: input.email || '',
     phone: input.phone || '',
     reference: input.reference || '',
+    referenceKey: (input.reference || '').toLowerCase(),
     seat: input.seat || '',
     batchId: 'manuel',
     status: 'valid',

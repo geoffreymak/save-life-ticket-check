@@ -8,17 +8,36 @@ export function TicketPreview({ ticket }: { ticket: Ticket }) {
   const [src, setSrc] = useState<string>('')
   const [busy, setBusy] = useState<'png' | 'pdf' | null>(null)
   const mounted = useRef(true)
+  const objectUrlRef = useRef('')
   const cfg = CATEGORIES[ticket.category]
 
   useEffect(() => {
     mounted.current = true
+    let cancelled = false
     renderTicketCanvas(ticket)
       .then((c) => {
-        if (mounted.current) setSrc(c.toDataURL('image/png'))
+        c.toBlob((blob) => {
+          c.width = 0
+          c.height = 0
+          if (!blob) return
+          const url = URL.createObjectURL(blob)
+          if (cancelled) {
+            URL.revokeObjectURL(url)
+            return
+          }
+          if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current)
+          objectUrlRef.current = url
+          if (mounted.current) setSrc(url)
+        }, 'image/png')
       })
       .catch((e) => console.error(e))
     return () => {
+      cancelled = true
       mounted.current = false
+      if (objectUrlRef.current) {
+        URL.revokeObjectURL(objectUrlRef.current)
+        objectUrlRef.current = ''
+      }
     }
   }, [ticket.id, ticket.secret, ticket.category])
 
