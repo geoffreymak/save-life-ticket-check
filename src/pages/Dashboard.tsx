@@ -331,9 +331,7 @@ export default function DashboardPage() {
                     </p>
                     <p className="text-xs text-brand-ink/50">
                       {cat ? `${cat.price} · ` : ""}
-                      {s.at?.toDate
-                        ? s.at.toDate().toLocaleTimeString("fr-FR")
-                        : ""}
+                      {s.at ? new Date(s.at).toLocaleTimeString("fr-FR") : ""}
                     </p>
                   </div>
                   <span

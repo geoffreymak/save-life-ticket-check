@@ -1,21 +1,4 @@
-import {
-  addDoc,
-  collection,
-  doc,
-  documentId,
-  getDoc,
-  getDocs,
-  limit,
-  orderBy,
-  query,
-  runTransaction,
-  serverTimestamp,
-  setDoc,
-  Timestamp,
-  where,
-  writeBatch,
-} from 'firebase/firestore'
-import { db } from './firebase'
+import { supabase } from './supabase'
 import { randomSecret } from './crypto'
 import type { Batch, CategoryId, Ticket } from './types'
 
@@ -28,8 +11,11 @@ export interface NewTicketInput {
   seat?: string
 }
 
-const FIRESTORE_BATCH_LIMIT = 450
 export const TICKET_PREVIEW_LIMIT = 120
+
+const SUPABASE_INSERT_LIMIT = 500
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 export interface BulkWriteProgress {
   phase: 'preparing' | 'writing'
@@ -39,121 +25,224 @@ export interface BulkWriteProgress {
   batchesTotal?: number
 }
 
-/** Crée un lot + tous ses billets de façon atomique (par tranches). */
+type DbTicket = {
+  id: string
+  secret: string
+  holder_name: string
+  category: CategoryId
+  email: string | null
+  phone: string | null
+  reference: string | null
+  reference_key: string | null
+  seat: string | null
+  batch_id: string | null
+  status: 'valid' | 'used'
+  created_at: string
+  created_by: string
+  scan_count: number
+  first_scan_at?: string | null
+  first_scan_by?: string | null
+  first_scan_by_email?: string | null
+}
+
+type DbBatch = {
+  id: string
+  name: string
+  created_at: string
+  created_by: string
+  created_by_email: string
+  count: number
+}
+
+function makeId() {
+  return crypto.randomUUID()
+}
+
+function toTicket(row: DbTicket): Ticket {
+  return {
+    id: row.id,
+    secret: row.secret,
+    holderName: row.holder_name,
+    category: row.category,
+    email: row.email || '',
+    phone: row.phone || '',
+    reference: row.reference || '',
+    referenceKey: row.reference_key || '',
+    seat: row.seat || '',
+    batchId: row.batch_id,
+    status: row.status,
+    createdAt: row.created_at,
+    createdBy: row.created_by,
+    scanCount: row.scan_count || 0,
+    firstScanAt: row.first_scan_at || undefined,
+    firstScanBy: row.first_scan_by || undefined,
+    firstScanByEmail: row.first_scan_by_email || undefined,
+  }
+}
+
+function toBatch(row: DbBatch): Batch {
+  return {
+    id: row.id,
+    name: row.name,
+    createdAt: row.created_at,
+    createdBy: row.created_by,
+    createdByEmail: row.created_by_email,
+    count: row.count || 0,
+  }
+}
+
+function ticketColumns() {
+  return [
+    'id',
+    'secret',
+    'holder_name',
+    'category',
+    'email',
+    'phone',
+    'reference',
+    'reference_key',
+    'seat',
+    'batch_id',
+    'status',
+    'created_at',
+    'created_by',
+    'scan_count',
+    'first_scan_at',
+    'first_scan_by',
+    'first_scan_by_email',
+  ].join(',')
+}
+
 export async function createBatchWithTickets(
   batchName: string,
   rows: NewTicketInput[],
   user: { uid: string; email: string },
   onProgress?: (progress: BulkWriteProgress) => void,
 ): Promise<{ batchId: string; tickets: Ticket[] }> {
-  const batchRef = doc(collection(db, 'batches'))
-  const batchId = batchRef.id
-  const createdAt = Timestamp.now()
+  const batchId = makeId()
+  const createdAt = new Date().toISOString()
 
   const prepared = rows.map((r, i) => {
-    const ref = doc(collection(db, 'tickets'))
     const reference = r.reference?.trim() || `SL-${String(i + 1).padStart(4, '0')}`
-    return { ref, reference, secret: randomSecret(), input: r }
+    const ticket: Ticket = {
+      id: makeId(),
+      secret: randomSecret(),
+      holderName: r.holderName,
+      category: r.category,
+      email: r.email || '',
+      phone: r.phone || '',
+      reference,
+      referenceKey: reference.toLowerCase(),
+      seat: r.seat || '',
+      batchId,
+      status: 'valid',
+      createdAt,
+      createdBy: user.uid,
+      scanCount: 0,
+    }
+    return ticket
   })
+
   onProgress?.({ phase: 'preparing', done: 0, total: prepared.length })
 
-  // Écriture du lot d'abord.
-  await setDoc(batchRef, {
+  const batchRow = {
+    id: batchId,
     name: batchName,
-    createdAt,
-    createdBy: user.uid,
-    createdByEmail: user.email,
+    created_at: createdAt,
+    created_by: user.uid,
+    created_by_email: user.email,
     count: prepared.length,
-  })
+  }
+  const { error: batchError } = await supabase.from('batches').insert(batchRow)
+  if (batchError) throw batchError
 
-  // Tickets par tranches (limite Firestore 500 ops/batch).
   let done = 0
-  const batchesTotal = Math.ceil(prepared.length / FIRESTORE_BATCH_LIMIT)
-  for (let i = 0; i < prepared.length; i += FIRESTORE_BATCH_LIMIT) {
-    const slice = prepared.slice(i, i + FIRESTORE_BATCH_LIMIT)
-    const wb = writeBatch(db)
-    for (const p of slice) {
-      wb.set(p.ref, {
-        secret: p.secret,
-        holderName: p.input.holderName,
-        category: p.input.category,
-        email: p.input.email || '',
-        phone: p.input.phone || '',
-        reference: p.reference,
-        referenceKey: p.reference.toLowerCase(),
-        seat: p.input.seat || '',
-        batchId,
-        status: 'valid',
-        createdAt,
-        createdBy: user.uid,
-        scanCount: 0,
-      })
-    }
-    await wb.commit()
+  const batchesTotal = Math.ceil(prepared.length / SUPABASE_INSERT_LIMIT)
+
+  for (let i = 0; i < prepared.length; i += SUPABASE_INSERT_LIMIT) {
+    const slice = prepared.slice(i, i + SUPABASE_INSERT_LIMIT)
+    const payload = slice.map((ticket) => ({
+      id: ticket.id,
+      secret: ticket.secret,
+      holder_name: ticket.holderName,
+      category: ticket.category,
+      email: ticket.email || '',
+      phone: ticket.phone || '',
+      reference: ticket.reference || '',
+      reference_key: ticket.referenceKey || '',
+      seat: ticket.seat || '',
+      batch_id: batchId,
+      status: ticket.status,
+      created_at: createdAt,
+      created_by: user.uid,
+      scan_count: 0,
+    }))
+
+    const { error } = await supabase.from('tickets').insert(payload)
+    if (error) throw error
+
     done += slice.length
     onProgress?.({
       phase: 'writing',
       done,
       total: prepared.length,
-      batchesDone: Math.ceil((i + slice.length) / FIRESTORE_BATCH_LIMIT),
+      batchesDone: Math.ceil((i + slice.length) / SUPABASE_INSERT_LIMIT),
       batchesTotal,
     })
   }
 
-  // Retour local : evite une relecture couteuse de tout le lot apres ecriture.
-  const tickets: Ticket[] = prepared.map((p) => ({
-    id: p.ref.id,
-    secret: p.secret,
-    holderName: p.input.holderName,
-    category: p.input.category,
-    email: p.input.email || '',
-    phone: p.input.phone || '',
-    reference: p.reference,
-    referenceKey: p.reference.toLowerCase(),
-    seat: p.input.seat || '',
-    batchId,
-    status: 'valid',
-    createdAt,
-    createdBy: user.uid,
-    scanCount: 0,
-  }))
-  return { batchId, tickets }
+  return { batchId, tickets: prepared }
 }
 
 export async function getTicketsByBatch(batchId: string): Promise<Ticket[]> {
-  const q = query(collection(db, 'tickets'), where('batchId', '==', batchId))
-  const snap = await getDocs(q)
-  return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Ticket, 'id'>) }))
+  const { data, error } = await supabase
+    .from('tickets')
+    .select(ticketColumns())
+    .eq('batch_id', batchId)
+    .order('reference', { ascending: true })
+
+  if (error) throw error
+  return ((data || []) as unknown as DbTicket[]).map(toTicket)
 }
 
 export async function getTicketsByBatchPreview(
   batchId: string,
   count = TICKET_PREVIEW_LIMIT,
 ): Promise<Ticket[]> {
-  const q = query(
-    collection(db, 'tickets'),
-    where('batchId', '==', batchId),
-    limit(count),
-  )
-  const snap = await getDocs(q)
-  return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Ticket, 'id'>) }))
+  return getTicketsByBatchPage(batchId, 0, count)
+}
+
+export async function getTicketsByBatchPage(
+  batchId: string,
+  offset = 0,
+  count = TICKET_PREVIEW_LIMIT,
+): Promise<Ticket[]> {
+  const from = Math.max(0, offset)
+  const to = from + Math.max(1, count) - 1
+  const { data, error } = await supabase
+    .from('tickets')
+    .select(ticketColumns())
+    .eq('batch_id', batchId)
+    .order('reference', { ascending: true })
+    .range(from, to)
+
+  if (error) throw error
+  return ((data || []) as unknown as DbTicket[]).map(toTicket)
 }
 
 export async function getTicketsByIds(ids: string[]): Promise<Ticket[]> {
-  const unique = [...new Set(ids.filter(Boolean))]
+  const unique = [...new Set(ids.filter((id) => UUID_RE.test(id)))]
   if (unique.length === 0) return []
 
   const result: Ticket[] = []
-  for (let i = 0; i < unique.length; i += 30) {
-    const chunk = unique.slice(i, i + 30)
-    const q = query(collection(db, 'tickets'), where(documentId(), 'in', chunk))
-    const snap = await getDocs(q)
-    result.push(
-      ...snap.docs.map((d) => ({
-        id: d.id,
-        ...(d.data() as Omit<Ticket, 'id'>),
-      })),
-    )
+  for (let i = 0; i < unique.length; i += 100) {
+    const chunk = unique.slice(i, i + 100)
+    const { data, error } = await supabase
+      .from('tickets')
+      .select(ticketColumns())
+      .in('id', chunk)
+    if (error) throw error
+    result.push(...((data || []) as unknown as DbTicket[]).map(toTicket))
   }
   return result
 }
@@ -164,38 +253,40 @@ export async function findTicketByReferenceOrId(
   const raw = value.trim()
   if (!raw) return null
 
-  const byId = await getTicket(raw)
-  if (byId) return byId
-
-  const byKey = await getDocs(
-    query(
-      collection(db, 'tickets'),
-      where('referenceKey', '==', raw.toLowerCase()),
-      limit(1),
-    ),
-  )
-  if (!byKey.empty) {
-    const d = byKey.docs[0]
-    return { id: d.id, ...(d.data() as Omit<Ticket, 'id'>) }
+  if (UUID_RE.test(raw)) {
+    const byId = await getTicket(raw)
+    if (byId) return byId
   }
 
+  const { data: byKey, error: keyError } = await supabase
+    .from('tickets')
+    .select(ticketColumns())
+    .eq('reference_key', raw.toLowerCase())
+    .limit(1)
+    .maybeSingle()
+  if (keyError) throw keyError
+  if (byKey) return toTicket(byKey as unknown as DbTicket)
+
   const variants = [...new Set([raw, raw.toUpperCase(), raw.toLowerCase()])]
-  const byReference = await getDocs(
-    query(
-      collection(db, 'tickets'),
-      where('reference', 'in', variants),
-      limit(1),
-    ),
-  )
-  if (byReference.empty) return null
-  const d = byReference.docs[0]
-  return { id: d.id, ...(d.data() as Omit<Ticket, 'id'>) }
+  const { data, error } = await supabase
+    .from('tickets')
+    .select(ticketColumns())
+    .in('reference', variants)
+    .limit(1)
+    .maybeSingle()
+  if (error) throw error
+  return data ? toTicket(data as unknown as DbTicket) : null
 }
 
 export async function listBatches(): Promise<Batch[]> {
-  const q = query(collection(db, 'batches'), orderBy('createdAt', 'desc'), limit(100))
-  const snap = await getDocs(q)
-  return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Batch, 'id'>) }))
+  const { data, error } = await supabase
+    .from('batches')
+    .select('id,name,created_at,created_by,created_by_email,count')
+    .order('created_at', { ascending: false })
+    .limit(100)
+
+  if (error) throw error
+  return (data || []).map((row) => toBatch(row as DbBatch))
 }
 
 export type ScanResultType = 'admitted' | 'already_used' | 'not_found' | 'invalid'
@@ -203,128 +294,127 @@ export type ScanResultType = 'admitted' | 'already_used' | 'not_found' | 'invali
 export interface ScanResult {
   result: ScanResultType
   ticket?: Ticket
-  firstScanAt?: Timestamp
+  firstScanAt?: string
   firstScanByEmail?: string
   scanCount?: number
 }
 
-/**
- * Vérifie et "consomme" un billet de manière atomique.
- * - 1er scan d'un billet valide => admitted (statut => used).
- * - scans suivants => already_used + détails du 1er passage.
- * - jeton invalide ou billet inexistant => refusé.
- */
 export async function scanTicket(
   id: string,
   secret: string,
-  user: { uid: string; email: string },
+  _user: { uid: string; email: string },
 ): Promise<ScanResult> {
-  const ticketRef = doc(db, 'tickets', id)
-  const scanLogRef = doc(collection(db, 'tickets', id, 'scans'))
+  if (!UUID_RE.test(id)) return { result: 'invalid' }
 
-  return runTransaction(db, async (tx) => {
-    const snap = await tx.get(ticketRef)
-    if (!snap.exists()) return { result: 'not_found' as const }
-
-    const data = snap.data() as Omit<Ticket, 'id'>
-    if (data.secret !== secret) return { result: 'invalid' as const }
-
-    const ticket: Ticket = { id, ...data }
-    const now = Timestamp.now()
-
-    if (data.status === 'valid') {
-      tx.update(ticketRef, {
-        status: 'used',
-        scanCount: (data.scanCount || 0) + 1,
-        firstScanAt: now,
-        firstScanBy: user.uid,
-        firstScanByEmail: user.email,
-      })
-      tx.set(scanLogRef, {
-        at: now,
-        by: user.uid,
-        byEmail: user.email,
-        result: 'admitted',
-      })
-      return {
-        result: 'admitted' as const,
-        ticket: { ...ticket, status: 'used', scanCount: (data.scanCount || 0) + 1 },
-        scanCount: (data.scanCount || 0) + 1,
-      }
-    }
-
-    // Déjà utilisé : on incrémente le compteur + log, sans réadmettre.
-    tx.update(ticketRef, { scanCount: (data.scanCount || 0) + 1 })
-    tx.set(scanLogRef, {
-      at: now,
-      by: user.uid,
-      byEmail: user.email,
-      result: 'already_used',
-    })
-    return {
-      result: 'already_used' as const,
-      ticket,
-      firstScanAt: data.firstScanAt,
-      firstScanByEmail: data.firstScanByEmail,
-      scanCount: (data.scanCount || 0) + 1,
-    }
+  const { data, error } = await supabase.rpc('scan_ticket', {
+    p_ticket_id: id,
+    p_secret: secret,
   })
+  if (error) throw error
+
+  const raw = data as {
+    result: ScanResultType
+    ticket?: DbTicket
+    firstScanAt?: string
+    firstScanByEmail?: string
+    scanCount?: number
+  }
+
+  return {
+    result: raw.result,
+    ticket: raw.ticket ? toTicket(raw.ticket) : undefined,
+    firstScanAt: raw.firstScanAt,
+    firstScanByEmail: raw.firstScanByEmail,
+    scanCount: raw.scanCount,
+  }
 }
 
 export async function getTicket(id: string): Promise<Ticket | null> {
-  const snap = await getDoc(doc(db, 'tickets', id))
-  if (!snap.exists()) return null
-  return { id: snap.id, ...(snap.data() as Omit<Ticket, 'id'>) }
+  if (!UUID_RE.test(id)) return null
+  const { data, error } = await supabase
+    .from('tickets')
+    .select(ticketColumns())
+    .eq('id', id)
+    .maybeSingle()
+
+  if (error) throw error
+  return data ? toTicket(data as unknown as DbTicket) : null
 }
 
 export async function getRecentScans(ticketId: string) {
-  const q = query(
-    collection(db, 'tickets', ticketId, 'scans'),
-    orderBy('at', 'desc'),
-    limit(20),
-  )
-  const snap = await getDocs(q)
-  return snap.docs.map((d) => d.data())
+  const { data, error } = await supabase
+    .from('scans')
+    .select('*')
+    .eq('ticket_id', ticketId)
+    .order('at', { ascending: false })
+    .limit(20)
+
+  if (error) throw error
+  return data || []
 }
 
-/** Journal global des derniers scans (pour le tableau de bord vérificateur). */
 export async function getDashboardStats(batchId?: string) {
-  const base = collection(db, 'tickets')
-  const q = batchId ? query(base, where('batchId', '==', batchId)) : query(base, limit(1000))
-  const snap = await getDocs(q)
-  let total = 0
+  let query = supabase
+    .from('tickets')
+    .select('category,status', { count: 'exact' })
+
+  if (batchId) query = query.eq('batch_id', batchId)
+
+  const { data, error, count } = await query
+  if (error) throw error
+
   let used = 0
   const byCategory: Record<string, { total: number; used: number }> = {}
-  snap.forEach((d) => {
-    const t = d.data() as Ticket
-    total++
-    if (t.status === 'used') used++
-    const c = (byCategory[t.category] ||= { total: 0, used: 0 })
+  for (const row of data || []) {
+    const c = (byCategory[row.category] ||= { total: 0, used: 0 })
     c.total++
-    if (t.status === 'used') c.used++
-  })
-  return { total, used, byCategory }
+    if (row.status === 'used') {
+      c.used++
+      used++
+    }
+  }
+  return { total: count || 0, used, byCategory }
 }
 
 export async function createAddOn(
   input: NewTicketInput,
   user: { uid: string; email: string },
 ): Promise<Ticket> {
-  const res = await addDoc(collection(db, 'tickets'), {
+  const reference = input.reference?.trim() || ''
+  const ticket: Ticket = {
+    id: makeId(),
     secret: randomSecret(),
     holderName: input.holderName,
     category: input.category,
     email: input.email || '',
     phone: input.phone || '',
-    reference: input.reference || '',
-    referenceKey: (input.reference || '').toLowerCase(),
+    reference,
+    referenceKey: reference.toLowerCase(),
     seat: input.seat || '',
-    batchId: 'manuel',
+    batchId: null,
     status: 'valid',
-    createdAt: serverTimestamp(),
+    createdAt: new Date().toISOString(),
     createdBy: user.uid,
     scanCount: 0,
+  }
+
+  const { error } = await supabase.from('tickets').insert({
+    id: ticket.id,
+    secret: ticket.secret,
+    holder_name: ticket.holderName,
+    category: ticket.category,
+    email: ticket.email || '',
+    phone: ticket.phone || '',
+    reference: ticket.reference || '',
+    reference_key: ticket.referenceKey || '',
+    seat: ticket.seat || '',
+    batch_id: null,
+    status: ticket.status,
+    created_at: ticket.createdAt,
+    created_by: user.uid,
+    scan_count: 0,
   })
-  const created = await getTicket(res.id)
-  return created!
+  if (error) throw error
+
+  return ticket
 }

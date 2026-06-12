@@ -25,16 +25,16 @@ import {
 import { CATEGORIES, CATEGORY_LIST } from "../lib/categories";
 import { getEventStats, type ComputedStats } from "../lib/stats";
 import { useAuth } from "../context/AuthContext";
-import type { Timestamp } from "firebase/firestore";
+import type { AppTimestamp } from "../lib/types";
 
 interface DisplayResult extends ScanResult {
   at: number;
 }
 
-function fmt(ts?: Timestamp): string {
+function fmt(ts?: AppTimestamp): string {
   if (!ts) return "—";
   try {
-    return ts.toDate().toLocaleString("fr-FR", {
+    return new Date(ts).toLocaleString("fr-FR", {
       dateStyle: "short",
       timeStyle: "medium",
     });

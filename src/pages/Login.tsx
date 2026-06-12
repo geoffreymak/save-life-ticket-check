@@ -13,6 +13,10 @@ function frError(code: string): string {
     'auth/email-already-in-use': 'Un compte existe déjà avec cet e-mail.',
     'auth/weak-password': 'Mot de passe trop faible (min. 6 caractères).',
     'auth/too-many-requests': 'Trop de tentatives. Réessayez plus tard.',
+    invalid_credentials: 'E-mail ou mot de passe incorrect.',
+    'Invalid login credentials': 'E-mail ou mot de passe incorrect.',
+    email_exists: 'Un compte existe deja avec cet e-mail.',
+    weak_password: 'Mot de passe trop faible.',
   }
   return map[code] || 'Une erreur est survenue. Réessayez.'
 }
@@ -39,7 +43,8 @@ export default function LoginPage() {
       else await signup(email, password, name)
       navigate('/')
     } catch (err: unknown) {
-      const code = (err as { code?: string })?.code || ''
+      const e = err as { code?: string; message?: string }
+      const code = e.code || e.message || ''
       setError(frError(code))
     } finally {
       setBusy(false)

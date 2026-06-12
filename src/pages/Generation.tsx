@@ -13,10 +13,9 @@ import {
 import { parseCsv, downloadCsvTemplate, type ParsedRow } from "../lib/csv";
 import {
   createBatchWithTickets,
-  getTicketsByBatchPreview,
+  getTicketsByBatchPage,
   getTicketsByBatch,
   listBatches,
-  TICKET_PREVIEW_LIMIT,
   type BulkWriteProgress,
 } from "../lib/tickets";
 import {
@@ -47,6 +46,7 @@ type NavigatorWithWakeLock = Navigator & {
 
 const ROW_PREVIEW_LIMIT = 120;
 const GENERATED_PREVIEW_STEP = 12;
+const EXISTING_PREVIEW_STEP = 10;
 
 async function withScreenWakeLock<T>(task: () => Promise<T>): Promise<T> {
   let lock: WakeLockSentinelLike | null = null;
@@ -130,7 +130,7 @@ function formatWriteProgress(progress: BulkWriteProgress): UiProgress {
     label:
       progress.phase === "preparing"
         ? "Preparation des billets"
-        : `Ecriture Firestore ${progress.batchesDone || 0}/${progress.batchesTotal || 0}`,
+        : `Ecriture base ${progress.batchesDone || 0}/${progress.batchesTotal || 0}`,
     done: progress.done,
     total: progress.total,
     percent,
@@ -267,71 +267,70 @@ function ReadyDownloadList({
   );
 }
 
-function TicketCompactList({
+function BatchTicketPreviewGrid({
   tickets,
   total,
-  previewLimit,
+  loadingMore,
+  onLoadMore,
 }: {
   tickets: Ticket[];
   total: number;
-  previewLimit: number;
+  loadingMore: boolean;
+  onLoadMore: () => void;
 }) {
+  const remaining = Math.max(0, total - tickets.length);
+  const nextCount = Math.min(EXISTING_PREVIEW_STEP, remaining);
+
   return (
     <div className="min-w-0">
       <div className="mb-3 flex min-w-0 flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
-          <p className="font-semibold text-brand-ink">Liste rapide</p>
+          <p className="font-semibold text-brand-ink">Apercu telechargeable</p>
           <p className="text-sm text-brand-ink/50">
-            {tickets.length}/{total} billets charges. Les exports utilisent le lot complet.
+            {tickets.length}/{total} billets affiches. Les exports en haut utilisent le lot complet.
           </p>
         </div>
+        {remaining > 0 && (
+          <button
+            className="btn-ghost w-full text-xs sm:w-auto"
+            disabled={loadingMore}
+            onClick={onLoadMore}
+          >
+            {loadingMore ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : null}
+            Afficher {nextCount} de plus
+          </button>
+        )}
       </div>
-      <div className="overflow-hidden rounded-xl border border-black/5 bg-white">
-        <div className="hidden grid-cols-[1.3fr_0.8fr_0.7fr_0.6fr] gap-3 bg-brand-cream/80 px-3 py-2 text-xs font-bold uppercase text-brand-ink/50 sm:grid">
-          <span>Nom</span>
-          <span>Reference</span>
-          <span>Categorie</span>
-          <span>Statut</span>
+      {tickets.length === 0 ? (
+        <div className="rounded-xl bg-white px-4 py-8 text-center text-sm text-brand-ink/50 ring-1 ring-black/5">
+          Aucun billet dans ce lot.
         </div>
-        <div className="divide-y divide-black/5">
-          {tickets.map((ticket) => {
-            const cfg = CATEGORIES[ticket.category];
-            return (
-              <div
-                key={ticket.id}
-                className="grid gap-2 px-3 py-2.5 text-sm sm:grid-cols-[1.3fr_0.8fr_0.7fr_0.6fr] sm:items-center"
-              >
-                <p className="min-w-0 truncate font-semibold text-brand-ink">
-                  {ticket.holderName}
-                </p>
-                <p className="truncate text-brand-ink/55">
-                  {ticket.reference || ticket.id}
-                </p>
-                <span
-                  className="w-fit rounded px-1.5 py-0.5 text-xs font-bold"
-                  style={{ background: cfg.accent, color: cfg.accentText }}
-                >
-                  {cfg.price}
-                </span>
-                <span
-                  className={`text-xs font-bold ${
-                    ticket.status === "used"
-                      ? "text-emerald-600"
-                      : "text-brand-ink/45"
-                  }`}
-                >
-                  {ticket.status === "used" ? "Entre" : "Valide"}
-                </span>
-              </div>
-            );
-          })}
+      ) : (
+        <div className="grid min-w-0 gap-4 sm:grid-cols-2 xl:grid-cols-2">
+          {tickets.map((ticket) => (
+            <TicketPreview key={ticket.id} ticket={ticket} />
+          ))}
         </div>
-      </div>
-      {total > previewLimit && (
-        <p className="mt-2 text-xs text-brand-ink/45">
-          Apercu limite a {previewLimit} billets pour garder l'app rapide.
-        </p>
       )}
+      {remaining > 0 && (
+        <div className="mt-4 flex justify-center">
+          <button
+            className="btn-primary w-full sm:w-auto"
+            disabled={loadingMore}
+            onClick={onLoadMore}
+          >
+            {loadingMore ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : null}
+            Afficher {nextCount} billets suivants
+          </button>
+        </div>
+      )}
+      <div className="mt-3 rounded-lg bg-brand-cream/70 px-3 py-2 text-xs text-brand-ink/55">
+        Les previews sont chargees par paquets de {EXISTING_PREVIEW_STEP} pour garder la page fluide.
+      </div>
     </div>
   );
 }
@@ -400,6 +399,35 @@ function NewImport({ user }: { user: { uid: string; email: string } }) {
       }
     };
     reader.readAsText(file, "utf-8");
+  }
+
+  function loadDevLargeCsv() {
+    const categories = ["VVIP", "VIP", "Standard"];
+    const stamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
+    const lines = ["nom,categorie,email,telephone,reference,place"];
+
+    for (let i = 1; i <= 5000; i++) {
+      const n = String(i).padStart(4, "0");
+      const values = [
+        `Test Invite ${n}`,
+        categories[(i - 1) % categories.length],
+        `invite${n}@example.com`,
+        `+243990${String(i).padStart(6, "0")}`,
+        `TEST${stamp}-${n}`,
+        `Table ${Math.ceil(i / 10)}-${((i - 1) % 10) + 1}`,
+      ];
+      lines.push(
+        values
+          .map((value) => `"${String(value).replace(/"/g, '""')}"`)
+          .join(","),
+      );
+    }
+
+    const file = new File([lines.join("\n")], "test-5000-tickets.csv", {
+      type: "text/csv",
+    });
+    handleFile(file);
+    setBatchName(`Test 5000 tickets ${stamp}`);
   }
 
   async function generate() {
@@ -628,6 +656,14 @@ function NewImport({ user }: { user: { uid: string; email: string } }) {
             <button className="btn-ghost w-full" onClick={downloadCsvTemplate}>
               <Download size={16} /> Modèle CSV
             </button>
+            {import.meta.env.DEV && (
+              <button
+                className="btn-ghost col-span-2 w-full text-xs sm:w-auto"
+                onClick={loadDevLargeCsv}
+              >
+                Test 5000
+              </button>
+            )}
           </div>
           <input
             ref={fileRef}
@@ -849,6 +885,7 @@ function ExistingBatches() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loadingTickets, setLoadingTickets] = useState(false);
+  const [loadingMoreTickets, setLoadingMoreTickets] = useState(false);
   const [exportJob, setExportJob] = useState<({
     id: string;
   } & UiProgress) | null>(null);
@@ -887,14 +924,33 @@ function ExistingBatches() {
   async function open(batch: Batch) {
     if (openId === batch.id) {
       setOpenId(null);
+      setTickets([]);
       return;
     }
     setOpenId(batch.id);
+    setTickets([]);
     setLoadingTickets(true);
     try {
-      setTickets(await getTicketsByBatchPreview(batch.id));
+      setTickets(await getTicketsByBatchPage(batch.id, 0, EXISTING_PREVIEW_STEP));
     } finally {
       setLoadingTickets(false);
+    }
+  }
+
+  async function loadMoreTickets(batch: Batch) {
+    if (loadingMoreTickets || tickets.length >= batch.count) return;
+    setLoadingMoreTickets(true);
+    try {
+      const next = await getTicketsByBatchPage(
+        batch.id,
+        tickets.length,
+        EXISTING_PREVIEW_STEP,
+      );
+      setTickets((current) => [...current, ...next]);
+    } catch {
+      setError("Impossible de charger plus de billets.");
+    } finally {
+      setLoadingMoreTickets(false);
     }
   }
 
@@ -1035,10 +1091,11 @@ function ExistingBatches() {
               {loadingTickets ? (
                 <Spinner label="Chargement des billets…" />
               ) : (
-                <TicketCompactList
+                <BatchTicketPreviewGrid
                   tickets={tickets}
                   total={b.count}
-                  previewLimit={TICKET_PREVIEW_LIMIT}
+                  loadingMore={loadingMoreTickets}
+                  onLoadMore={() => loadMoreTickets(b)}
                 />
               )}
             </div>

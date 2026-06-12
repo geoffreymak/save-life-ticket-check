@@ -1,4 +1,4 @@
-import { useNavigate } from 'react-router-dom'
+import { Navigate, useNavigate } from 'react-router-dom'
 import { Clock, LogOut, RefreshCw } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 
@@ -8,7 +8,7 @@ export default function PendingPage() {
 
   // Si entre-temps un rôle a été attribué, on redirige.
   if (role && role !== 'pending') {
-    navigate('/')
+    return <Navigate to="/" replace />
   }
 
   return (

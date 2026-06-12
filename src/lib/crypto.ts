@@ -10,7 +10,7 @@ export function randomSecret(bytes = 20): string {
   return out
 }
 
-/** Contenu encodé dans le QR : "id.secret" (opaque, vérifié côté Firestore). */
+/** Contenu encodé dans le QR : "id.secret" (opaque, vérifié côté base). */
 export function buildQrPayload(id: string, secret: string): string {
   return `${id}.${secret}`
 }

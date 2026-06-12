@@ -1,13 +1,12 @@
-import type { Timestamp } from "firebase/firestore";
-
 export type Role = "admin" | "generator" | "verifier" | "pending";
+export type AppTimestamp = string;
 
 export interface AppUser {
   uid: string;
   email: string;
   displayName: string;
   role: Role;
-  createdAt?: Timestamp;
+  createdAt?: AppTimestamp;
 }
 
 /** Identifiants de catégorie correspondant aux trois modèles de billet. */
@@ -16,7 +15,7 @@ export type CategoryId = "VVIP" | "VIP" | "STANDARD";
 export type TicketStatus = "valid" | "used";
 
 export interface ScanEvent {
-  at: Timestamp;
+  at: AppTimestamp;
   by: string; // uid
   byEmail: string;
   result: "admitted" | "already_used";
@@ -33,12 +32,12 @@ export interface Ticket {
   reference?: string; // numéro de billet lisible (ex: SL-0001)
   referenceKey?: string;
   seat?: string;
-  batchId: string;
+  batchId: string | null;
   status: TicketStatus;
-  createdAt: Timestamp;
+  createdAt: AppTimestamp;
   createdBy: string;
   scanCount: number;
-  firstScanAt?: Timestamp;
+  firstScanAt?: AppTimestamp;
   firstScanBy?: string;
   firstScanByEmail?: string;
 }
@@ -46,7 +45,7 @@ export interface Ticket {
 export interface Batch {
   id: string;
   name: string;
-  createdAt: Timestamp;
+  createdAt: AppTimestamp;
   createdBy: string;
   createdByEmail: string;
   count: number;
