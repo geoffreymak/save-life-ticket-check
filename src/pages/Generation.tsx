@@ -19,7 +19,12 @@ import {
   TICKET_PREVIEW_LIMIT,
   type BulkWriteProgress,
 } from "../lib/tickets";
-import { downloadBatchPdf, type ExportProgress } from "../lib/ticketRenderer";
+import {
+  downloadBatchPdf,
+  revokeReadyDownload,
+  type ExportProgress,
+  type ReadyDownloadFile,
+} from "../lib/ticketRenderer";
 import { downloadBatchZipPdf, downloadBatchZipPng } from "../lib/exportZip";
 import { CATEGORIES, CATEGORY_LIST } from "../lib/categories";
 import { useAuth } from "../context/AuthContext";
@@ -69,14 +74,51 @@ function formatExportProgress(title: string, progress: ExportProgress): UiProgre
       ? "Preparation du fichier"
       : progress.phase === "download"
         ? "Ouverture du telechargement"
-        : "Generation des billets";
+        : progress.phase === "ready"
+          ? "Fichier pret"
+          : "Generation des billets";
+  const partLabel =
+    progress.parts && progress.parts > 1
+      ? ` - paquet ${progress.part || 1}/${progress.parts}`
+      : "";
   return {
     title,
-    label,
+    label: `${label}${partLabel}`,
     done: progress.done,
     total: progress.total,
     percent: Math.max(0, Math.min(100, percent)),
   };
+}
+
+function readyFileFromProgress(
+  progress: ExportProgress,
+): ReadyDownloadFile | null {
+  if (progress.phase !== "ready" || !progress.url || !progress.fileName) {
+    return null;
+  }
+  return {
+    fileName: progress.fileName,
+    url: progress.url,
+    bytes: progress.bytes || 0,
+    part: progress.part,
+    parts: progress.parts,
+  };
+}
+
+function formatBytes(bytes: number) {
+  if (!bytes) return "";
+  const units = ["o", "Ko", "Mo", "Go"];
+  let value = bytes;
+  let index = 0;
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024;
+    index += 1;
+  }
+  return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+}
+
+function revokeFiles(files: ReadyDownloadFile[]) {
+  files.forEach((file) => revokeReadyDownload(file));
 }
 
 function formatWriteProgress(progress: BulkWriteProgress): UiProgress {
@@ -182,6 +224,49 @@ function ProgressCard({
   );
 }
 
+function ReadyDownloadList({
+  files,
+  onClear,
+}: {
+  files: ReadyDownloadFile[];
+  onClear: () => void;
+}) {
+  if (files.length === 0) return null;
+
+  return (
+    <div className="rounded-xl bg-white p-4 ring-1 ring-black/5">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-bold text-brand-ink">Telechargements prets</p>
+          <p className="text-xs text-brand-ink/55">
+            Si le navigateur bloque l'ouverture automatique, cliquez ici sur chaque fichier.
+          </p>
+        </div>
+        <button className="btn-ghost px-2.5 py-1.5 text-xs" onClick={onClear}>
+          Nettoyer
+        </button>
+      </div>
+      <div className="max-h-60 divide-y divide-black/5 overflow-auto rounded-lg border border-black/5">
+        {files.map((file) => (
+          <a
+            key={file.url}
+            href={file.url}
+            download={file.fileName}
+            className="flex min-w-0 items-center justify-between gap-3 px-3 py-2 text-sm hover:bg-brand-cream/60"
+          >
+            <span className="min-w-0 truncate font-semibold text-brand-ink">
+              {file.fileName}
+            </span>
+            <span className="shrink-0 text-xs text-brand-ink/50">
+              {formatBytes(file.bytes)}
+            </span>
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function TicketCompactList({
   tickets,
   total,
@@ -253,6 +338,7 @@ function TicketCompactList({
 
 function NewImport({ user }: { user: { uid: string; email: string } }) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const readyDownloadsRef = useRef<ReadyDownloadFile[]>([]);
   const [fileName, setFileName] = useState("");
   const [rows, setRows] = useState<ParsedRow[]>([]);
   const [batchName, setBatchName] = useState("");
@@ -265,6 +351,7 @@ function NewImport({ user }: { user: { uid: string; email: string } }) {
     null,
   );
   const [exportJob, setExportJob] = useState<UiProgress | null>(null);
+  const [readyDownloads, setReadyDownloads] = useState<ReadyDownloadFile[]>([]);
   const [error, setError] = useState("");
 
   const validRows = useMemo(() => rows.filter((r) => r.valid), [rows]);
@@ -274,11 +361,30 @@ function NewImport({ user }: { user: { uid: string; email: string } }) {
     [rows],
   );
 
+  useEffect(() => {
+    return () => revokeFiles(readyDownloadsRef.current);
+  }, []);
+
+  function clearReadyDownloads() {
+    revokeFiles(readyDownloadsRef.current);
+    readyDownloadsRef.current = [];
+    setReadyDownloads([]);
+  }
+
+  function trackExportProgress(title: string, progress: ExportProgress) {
+    setExportJob(formatExportProgress(title, progress));
+    const file = readyFileFromProgress(progress);
+    if (!file) return;
+    readyDownloadsRef.current = [...readyDownloadsRef.current, file];
+    setReadyDownloads(readyDownloadsRef.current);
+  }
+
   function handleFile(file: File) {
     setError("");
     setGenerated(null);
     setGenerateProgress(null);
     setExportJob(null);
+    clearReadyDownloads();
     setGeneratedPreviewLimit(GENERATED_PREVIEW_STEP);
     setFileName(file.name);
     if (!batchName) setBatchName(file.name.replace(/\.csv$/i, ""));
@@ -337,6 +443,7 @@ function NewImport({ user }: { user: { uid: string; email: string } }) {
   async function exportAllPdf() {
     if (!generated) return;
     const title = "PDF complet";
+    clearReadyDownloads();
     setExportJob({
       title,
       label: "Preparation",
@@ -347,7 +454,7 @@ function NewImport({ user }: { user: { uid: string; email: string } }) {
     try {
       await withScreenWakeLock(() =>
         downloadBatchPdf(generated, batchName.trim() || "billets", (p) =>
-          setExportJob(formatExportProgress(title, p)),
+          trackExportProgress(title, p),
         ),
       );
     } finally {
@@ -358,6 +465,7 @@ function NewImport({ user }: { user: { uid: string; email: string } }) {
   async function exportAllZip(kind: "png" | "pdf") {
     if (!generated) return;
     const title = kind === "png" ? "ZIP PNG" : "ZIP PDF";
+    clearReadyDownloads();
     setExportJob({
       title,
       label: "Preparation",
@@ -369,7 +477,7 @@ function NewImport({ user }: { user: { uid: string; email: string } }) {
     try {
       await withScreenWakeLock(() =>
         fn(generated, batchName.trim() || "billets", (p) =>
-          setExportJob(formatExportProgress(title, p)),
+          trackExportProgress(title, p),
         ),
       );
     } finally {
@@ -382,6 +490,7 @@ function NewImport({ user }: { user: { uid: string; email: string } }) {
     setGenerated(null);
     setGenerateProgress(null);
     setExportJob(null);
+    clearReadyDownloads();
     setGeneratedPreviewLimit(GENERATED_PREVIEW_STEP);
     setFileName("");
     setBatchName("");
@@ -450,6 +559,14 @@ function NewImport({ user }: { user: { uid: string; email: string } }) {
         </div>
 
         {exportJob && <ProgressCard progress={exportJob} className="mb-5" />}
+        {readyDownloads.length > 0 && (
+          <div className="mb-5">
+            <ReadyDownloadList
+              files={readyDownloads}
+              onClear={clearReadyDownloads}
+            />
+          </div>
+        )}
 
         <div className="mb-3 flex min-w-0 flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
           <div className="min-w-0">
@@ -726,6 +843,7 @@ function NewImport({ user }: { user: { uid: string; email: string } }) {
 }
 
 function ExistingBatches() {
+  const readyDownloadsRef = useRef<ReadyDownloadFile[]>([]);
   const [batches, setBatches] = useState<Batch[]>([]);
   const [loading, setLoading] = useState(true);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -734,7 +852,12 @@ function ExistingBatches() {
   const [exportJob, setExportJob] = useState<({
     id: string;
   } & UiProgress) | null>(null);
+  const [readyDownloads, setReadyDownloads] = useState<ReadyDownloadFile[]>([]);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    return () => revokeFiles(readyDownloadsRef.current);
+  }, []);
 
   useEffect(() => {
     listBatches()
@@ -742,6 +865,24 @@ function ExistingBatches() {
       .catch(() => setError("Impossible de charger les lots."))
       .finally(() => setLoading(false));
   }, []);
+
+  function clearReadyDownloads() {
+    revokeFiles(readyDownloadsRef.current);
+    readyDownloadsRef.current = [];
+    setReadyDownloads([]);
+  }
+
+  function trackBatchExportProgress(
+    batchId: string,
+    title: string,
+    progress: ExportProgress,
+  ) {
+    setExportJob({ id: batchId, ...formatExportProgress(title, progress) });
+    const file = readyFileFromProgress(progress);
+    if (!file) return;
+    readyDownloadsRef.current = [...readyDownloadsRef.current, file];
+    setReadyDownloads(readyDownloadsRef.current);
+  }
 
   async function open(batch: Batch) {
     if (openId === batch.id) {
@@ -759,6 +900,7 @@ function ExistingBatches() {
 
   async function exportAll(batch: Batch) {
     const title = "PDF complet";
+    clearReadyDownloads();
     setExportJob({
       id: batch.id,
       title,
@@ -771,7 +913,7 @@ function ExistingBatches() {
       await withScreenWakeLock(async () => {
         const list = await getTicketsByBatch(batch.id);
         await downloadBatchPdf(list, batch.name, (p) =>
-          setExportJob({ id: batch.id, ...formatExportProgress(title, p) }),
+          trackBatchExportProgress(batch.id, title, p),
         );
       });
     } finally {
@@ -781,6 +923,7 @@ function ExistingBatches() {
 
   async function exportZip(batch: Batch, kind: "png" | "pdf") {
     const title = kind === "png" ? "ZIP PNG" : "ZIP PDF";
+    clearReadyDownloads();
     setExportJob({
       id: batch.id,
       title,
@@ -794,7 +937,7 @@ function ExistingBatches() {
       await withScreenWakeLock(async () => {
         const list = await getTicketsByBatch(batch.id);
         await fn(list, batch.name, (p) =>
-          setExportJob({ id: batch.id, ...formatExportProgress(title, p) }),
+          trackBatchExportProgress(batch.id, title, p),
         );
       });
     } finally {
@@ -820,6 +963,12 @@ function ExistingBatches() {
 
   return (
     <div className="min-w-0 space-y-3">
+      {readyDownloads.length > 0 && (
+        <ReadyDownloadList
+          files={readyDownloads}
+          onClear={clearReadyDownloads}
+        />
+      )}
       {batches.map((b) => {
         const isBatchExporting = exportJob?.id === b.id;
         return (

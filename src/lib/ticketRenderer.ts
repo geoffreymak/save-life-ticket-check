@@ -6,17 +6,31 @@ import type { Ticket } from "./types";
 
 const imageCache = new Map<string, Promise<HTMLImageElement>>();
 const PDF_WIDTH_MM = 220;
+const PDF_EXPORT_CHUNK_SIZE = 150;
 
-export type ExportPhase = "render" | "compress" | "download";
+export type ExportPhase = "render" | "compress" | "download" | "ready";
 
 export interface ExportProgress {
   phase: ExportPhase;
   done: number;
   total: number;
   percent?: number;
+  part?: number;
+  parts?: number;
+  fileName?: string;
+  url?: string;
+  bytes?: number;
 }
 
 export type ExportProgressHandler = (progress: ExportProgress) => void;
+
+export interface ReadyDownloadFile {
+  fileName: string;
+  url: string;
+  bytes: number;
+  part?: number;
+  parts?: number;
+}
 
 function loadImage(src: string): Promise<HTMLImageElement> {
   if (!imageCache.has(src)) {
@@ -188,6 +202,71 @@ function yieldToBrowser() {
   });
 }
 
+function safeFileBase(name: string) {
+  return name.replace(/[^\w-]+/g, "_") || "billets";
+}
+
+function chunkFileName(
+  name: string,
+  suffix: string,
+  ext: string,
+  part: number,
+  parts: number,
+) {
+  const base = safeFileBase(name);
+  if (parts <= 1) return `${base}.${ext}`;
+  const current = String(part).padStart(String(parts).length, "0");
+  return `${base}_${suffix}_${current}-sur-${parts}.${ext}`;
+}
+
+export function triggerReadyDownload(file: ReadyDownloadFile) {
+  const a = document.createElement("a");
+  a.href = file.url;
+  a.download = file.fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+export function revokeReadyDownload(file: ReadyDownloadFile) {
+  URL.revokeObjectURL(file.url);
+}
+
+export function prepareReadyDownload(
+  blob: Blob,
+  fileName: string,
+  part?: number,
+  parts?: number,
+): ReadyDownloadFile {
+  return {
+    fileName,
+    url: URL.createObjectURL(blob),
+    bytes: blob.size,
+    part,
+    parts,
+  };
+}
+
+export function emitReadyDownload(
+  file: ReadyDownloadFile,
+  done: number,
+  total: number,
+  onProgress?: ExportProgressHandler,
+) {
+  triggerReadyDownload(file);
+  onProgress?.({
+    phase: "ready",
+    done,
+    total,
+    percent: total ? Math.round((done / total) * 100) : 100,
+    part: file.part,
+    parts: file.parts,
+    fileName: file.fileName,
+    url: file.url,
+    bytes: file.bytes,
+  });
+}
+
 export async function downloadBatchPdf(
   tickets: Ticket[],
   name: string,
@@ -195,20 +274,53 @@ export async function downloadBatchPdf(
 ): Promise<void> {
   if (tickets.length === 0) return;
 
-  let pdf: jsPDF | null = null;
   const total = tickets.length;
+  const parts = Math.ceil(total / PDF_EXPORT_CHUNK_SIZE);
+  let done = 0;
 
-  for (let i = 0; i < total; i++) {
-    const canvas = await renderTicketCanvas(tickets[i]);
-    if (!pdf) pdf = makePdfForCanvas(canvas);
-    addCanvasPage(pdf, canvas, i === 0);
-    releaseCanvas(canvas);
-    onProgress?.({ phase: "render", done: i + 1, total });
-    if (i % 5 === 4) await yieldToBrowser();
+  for (let partIndex = 0; partIndex < parts; partIndex++) {
+    const start = partIndex * PDF_EXPORT_CHUNK_SIZE;
+    const slice = tickets.slice(start, start + PDF_EXPORT_CHUNK_SIZE);
+    let pdf: jsPDF | null = null;
+
+    for (let i = 0; i < slice.length; i++) {
+      const canvas = await renderTicketCanvas(slice[i]);
+      if (!pdf) pdf = makePdfForCanvas(canvas);
+      addCanvasPage(pdf, canvas, i === 0);
+      releaseCanvas(canvas);
+      done += 1;
+      onProgress?.({
+        phase: "render",
+        done,
+        total,
+        percent: Math.round((done / total) * 100),
+        part: partIndex + 1,
+        parts,
+      });
+      if (done % 5 === 0) await yieldToBrowser();
+    }
+
+    const fileName = chunkFileName(
+      name,
+      "pdf",
+      "pdf",
+      partIndex + 1,
+      parts,
+    );
+    onProgress?.({
+      phase: "download",
+      done,
+      total,
+      percent: Math.round((done / total) * 100),
+      part: partIndex + 1,
+      parts,
+    });
+    const blob = pdf!.output("blob");
+    const file = prepareReadyDownload(blob, fileName, partIndex + 1, parts);
+    emitReadyDownload(file, done, total, onProgress);
+    pdf = null;
+    await yieldToBrowser();
   }
-
-  onProgress?.({ phase: "download", done: total, total });
-  pdf!.save(`${name}.pdf`);
 }
 
 function triggerDownload(blob: Blob, filename: string) {
